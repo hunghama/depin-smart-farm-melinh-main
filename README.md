@@ -28,3 +28,10 @@
 
 # }
 
+## ⚖️ Bản quyền dự án (License)
+Dự án này áp dụng mã nguồn mở theo chuẩn **MIT License** (bản gốc trong file `LICENSE`). 
+
+**Tóm tắt bằng tiếng Việt:**
+- **Quyền hạn:** Cho phép mọi người tự do sao chép, sửa đổi, phân phối và sử dụng mã nguồn này cho cả mục đích cá nhân lẫn thương mại.
+- **Điều kiện:** Phải giữ lại dòng thông báo bản quyền `Copyright (c) 2026 hunghama` trong tất cả các bản sao của mã nguồn.
+- **Trách nhiệm:** Mã nguồn được cung cấp "như hiện tại", nhóm tác giả không chịu trách nhiệm pháp lý đối với bất kỳ sự cố nào phát sinh từ việc vận hành phần mềm.
