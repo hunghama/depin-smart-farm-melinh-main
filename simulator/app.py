@@ -6,6 +6,7 @@ def main():
     # Khởi tạo đối tượng thông qua Interface chuẩn
     simulator = SmartFarmSimulator()
     backend_url = "http://localhost:8000/api/v1/sensor-data" # Cổng Backend tương lai
+    session = requests.Session()
     
     print("==================================================")
     print("📡 TRẠM VẬN HÀNH IOT SMART FARM MÊ LINH (DEPIN)")
@@ -19,7 +20,7 @@ def main():
             
             # 2. Bắn gói tin sang API của Backend
             try:
-                response = requests.post(backend_url, json=packet, timeout=3)
+                response = session.post(backend_url, json=packet, timeout=3)
                 print(f"➡️ Trạng thái gửi Backend: Status Code {response.status_code}")
             except requests.exceptions.ConnectionError:
                 print("⚠️ Trạng thái: Backend chưa mở, trạm vẫn tự động đóng gói dữ liệu tại chỗ...")
