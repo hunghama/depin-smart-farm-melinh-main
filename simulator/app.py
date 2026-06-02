@@ -5,7 +5,7 @@ from sensor_core import SmartFarmSimulator
 def main():
     # Khởi tạo đối tượng thông qua Interface chuẩn
     simulator = SmartFarmSimulator()
-    backend_url = "http://localhost:8000/api/v1/sensor-data" # Cổng Backend tương lai
+    backend_url = "http://127.0.0.1:8000/api/v1/sensor" # Cổng Backend tương lai
     session = requests.Session()
     
     print("==================================================")
