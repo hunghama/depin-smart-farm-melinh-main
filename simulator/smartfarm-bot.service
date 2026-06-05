@@ -1,0 +1,16 @@
+[Unit]
+Description=Bot Cao Du Lieu Khi Tuong Me Linh 24/7
+After=network.target
+
+[Service]
+Type=simple
+# Đường dẫn tới thư mục chứa bot trên server sau này
+WorkingDirectory=/root/depin-smart-farm-melinh/simulator
+# Lệnh kích hoạt bot chạy bằng Python3
+ExecStart=/usr/bin/python3 app.py
+# Cơ chế tự động hồi sinh nếu bot bị sập sau 5 giây
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
