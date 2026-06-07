@@ -1,0 +1,175 @@
+import os
+import sys
+from dotenv import load_dotenv
+
+# 🔥 SỬA TẠI ĐÂY: Dùng insert(0, ...) để ép đường dẫn gốc lên quyền ưu tiên CAO NHẤT
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+# 1. Nạp file .env lên hệ thống trước khi các module khác khởi chạy
+load_dotenv()
+
+from fastapi import FastAPI, status, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # Thư viện mở khóa CORS
+from pydantic import BaseModel
+from google import genai  # SDK Gemini chính hãng mới nhất
+from backend.storage import MongoStorage  # Nạp module lưu trữ của ông
+
+# 2. Khởi tạo ứng dụng và lớp lưu trữ dữ liệu
+app = FastAPI(title="Smart Farm Mê Linh API v1 - Gemini Edition")
+
+# Cấu hình thông chốt CORS bảo mật để file frontend/index.html bốc được API mà không bị chặn
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Cho phép tất cả các nguồn truy cập
+    allow_credentials=True,
+    allow_methods=["*"],  # Cho phép mọi phương thức GET, POST,...
+    allow_headers=["*"],  # Cho phép mọi Header truyền lên
+)
+
+storage = MongoStorage()
+
+# Khởi tạo Client Gemini (Nó sẽ tự động bốc biến GEMINI_API_KEY trong file .env ra dùng)
+try:
+    ai_client = genai.Client()
+except Exception as e:
+    print(f"⚠️ Cảnh báo: Chưa cấu hình được Gemini Client (Thiếu API Key): {e}")
+    ai_client = None
+
+class SensorDataInput(BaseModel):
+    sensor_id: str
+    temperature: float
+    soil_moisture: float
+    timestamp: int
+    data_hash: str
+
+
+# =====================================================================
+# 💾 CỔNG NHẬN DATA PHẦN CỨNG (Để dành làm gói VIP cắm ruộng sau này)
+# =====================================================================
+@app.post("/api/v1/sensor", status_code=status.HTTP_201_CREATED)
+def receive_sensor_data(data: SensorDataInput):
+    packet = data.model_dump()
+    is_hash_valid = True # Tạm thời giả định qua chốt bảo mật DePIN
+    
+    if not is_hash_valid:
+        raise HTTPException(status_code=403, detail="Mã băm DePIN không hợp lệ!")
+        
+    db_saved = storage.save_sensor_data(packet)
+    if not db_saved:
+        return {"message": "Dữ liệu được tiếp nhận nhưng lưu trữ tạm thời gặp sự cố", "status": "fallback"}
+        
+    return {"message": "Dữ liệu Mê Linh đã ghi nhận thành công vào MongoDB Atlas!", "status": "success"}
+
+
+# =====================================================================
+# 🚀 CÁC ENDPOINT MVP CHÍNH: LẤY DATA KHÍ TƯỢNG & AI CẤY NÃO GEMINI
+# =====================================================================
+
+@app.get("/api/v1/weather/latest")
+def get_latest_weather():
+    """
+    Endpoint bốc dữ liệu thời tiết thô mới nhất do bot cào về 
+    để phục vụ giao diện Web App.
+    """
+    weather_data = storage.get_latest_weather_data()
+    
+    if not weather_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Kho dữ liệu thời tiết trống! Hãy kiểm tra lại con bot cào dữ liệu."
+        )
+        
+    return {"status": "success", "data": weather_data}
+
+
+@app.get("/api/v1/weather/recommendation")
+def get_ai_recommendation():
+    """
+    Linh hồn hệ thống: Gọi thẳng não thật Gemini API đọc data thời tiết để nhả lời khuyên thực chiến.
+    Nếu API gặp sự cố hoặc hết hạn mức, hệ thống tự động tụt về Hệ chuyên gia dự phòng (If/Else).
+    """
+    weather_data = storage.get_latest_weather_data()
+    
+    if not weather_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Thiếu dữ liệu thời tiết thực tế để AI chạy phân tích!"
+        )
+        
+    # Bóc tách chuẩn các trường dữ liệu theo đúng Schema mà bot đang cào lên mây
+    temp = weather_data.get("temperature", 25.0)
+    humidity = weather_data.get("humidity", 70.0)
+    rain = weather_data.get("rain", 0.0)
+    
+    # 🤖 BIẾN THỂ 1: Sử dụng não thật Gemini API (Nếu đã cấu hình Key chuẩn)
+    if ai_client and os.getenv("GEMINI_API_KEY"):
+        prompt = f"""
+        Bạn là một chuyên gia nông nghiệp công nghệ cao am hiểu sâu sắc về canh tác hoa hồng, hoa cúc, đào Tết và rau màu tại huyện Mê Linh, Hà Nội.
+        Hãy phân tích các chỉ số thời tiết thời gian thực sau đây:
+        - Nhiệt độ: {temp}°C
+        - Độ ẩm không khí: {humidity}%
+        - Lượng mưa: {rain}mm
+        
+        Yêu cầu: Hãy đưa ra 1 lời khuyên ngắn gọn (khoảng 3-4 câu), thực chiến, dùng ngôn từ bình dị của nhà nông để hướng dẫn bà con Mê Linh cần làm gì (ví dụ: che lưới, khơi thông luống, tưới nước hay dừng bón phân). Khuyến nghị phải sát thực tế với các loại cây trồng đặc thù của địa phương. Không sử dụng định dạng Markdown (như dấu sao, bôi đậm), hãy trả về văn bản thuần sạch sẽ.
+        """
+        try:
+            response = ai_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+            )
+            return {
+                "status": "success",
+                "ai_engine": "Gemini 2.5 Flash (Dynamic AI)",
+                "station_name": weather_data.get("station_name"),
+                "metrics_analyzed": {
+                    "temperature_celsius": temp,
+                    "humidity_percent": humidity,
+                    "rain_mm": rain
+                },
+                "ai_decision": {
+                    "recommendation": response.text.strip(),
+                    "action_code": "GEMINI_DYNAMIC"
+                }
+            }
+        except Exception as e:
+            print(f"⚠️ Sự cố gọi Gemini API (Chuyển luồng về Hệ chuyên gia dự phòng): {e}")
+
+    # 🪵 BIẾN THỂ 2: Hệ chuyên gia dự phòng Rule-based (If/Else cố định)
+    recommendation = "🌤️ Thời tiết đang rất lý tưởng. Bà con tranh thủ bón phân định kỳ và chăm sóc cây trồng bình thường."
+    action_code = "STATUS_OK"
+    
+    if temp > 35.0:
+        recommendation = "⚠️ Trời nắng gắt trên 35°C! Khuyến nghị kéo lưới đen che giảm nắng cho các ruộng hoa hồng, hoa cúc Mê Linh; tuyệt đối không bón phân hóa học vào giữa trưa."
+        action_code = "SHADE_REQUIRED"
+    elif rain > 20.0:
+        recommendation = "🚨 Cảnh báo mưa lớn úng rễ! Bà con cần chủ động ra đồng khơi thông bờ thửa, chuẩn bị máy bơm thoát nước cho các luống rau màu và vườn đào tránh đọng nước."
+        action_code = "DRAINAGE_NOW"
+    elif humidity < 50.0 and temp > 30.0:
+        recommendation = "🍂 Không khí hanh khô, độ ẩm xuống thấp. Tăng cường hệ thống tưới phun sương vào đầu giờ sáng và chiều mát để bảo vệ lá và búp hoa không bị héo tắp."
+        action_code = "INCREASE_IRRIGATION"
+    elif temp < 15.0:
+        recommendation = "❄️ Trời rét đậm, nguy cơ sương muối gây thối búp hoa cực cao. Khuyến nghị bà con tưới lướt nước chân ruộng vào sáng sớm để phá sương bảo vệ hoa tết."
+        action_code = "ANTI_FROST"
+
+    return {
+        "status": "success",
+        "ai_engine": "Rule-based Expert System (Fallback Mode)",
+        "station_name": weather_data.get("station_name"),
+        "metrics_analyzed": {
+            "temperature_celsius": temp,
+            "humidity_percent": humidity,
+            "rain_mm": rain
+        },
+        "ai_decision": {
+            "recommendation": recommendation,
+            "action_code": action_code
+        }
+    }
+
+
+# 3. Bộ kích hoạt chạy Server trực tiếp
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True)
