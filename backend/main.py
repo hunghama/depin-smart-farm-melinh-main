@@ -5,12 +5,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, status, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # 🔥 THÊM MỚI: Thư viện mở khóa CORS
 from pydantic import BaseModel
 from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage  # Nạp module lưu trữ sạch của ông
 
 # 2. Khởi tạo ứng dụng và lớp lưu trữ dữ liệu
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Gemini Edition")
+
+# 🔥 THÊM MỚI: Cấu hình thông chốt CORS bảo mật để file frontend/index.html bốc được API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Cho phép tất cả các nguồn truy cập (Mở chốt cho Frontend)
+    allow_credentials=True,
+    allow_methods=["*"],  # Cho phép mọi phương thức GET, POST,...
+    allow_headers=["*"],  # Cho phép mọi Header truyền lên
+)
+
 storage = MongoStorage()
 
 # Khởi tạo Client Gemini (Nó sẽ tự động bốc biến GEMINI_API_KEY trong file .env ra dùng)
