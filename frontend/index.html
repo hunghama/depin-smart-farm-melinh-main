@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Farm Mê Linh - AI Khuyến Nghị</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 font-sans min-h-screen flex flex-col justify-between">
+
+    <header class="bg-emerald-600 text-white text-center py-5 shadow-md">
+        <h1 class="text-xl font-bold uppercase tracking-wide">Smart Farm Mê Linh</h1>
+        <p class="text-xs text-emerald-100 mt-1">Hệ Thống Giám Sát Khí Tượng & Khuyến Nghị AI Công Nghệ Cao</p>
+    </header>
+
+    <main class="container mx-auto px-4 py-6 max-w-md flex-grow">
+        
+        <div class="bg-white rounded-2xl shadow-sm p-4 mb-5 border border-slate-200">
+            <div class="flex justify-between items-center mb-3">
+                <span id="station-name" class="text-sm font-semibold text-slate-700">📍 Đang tải trạm...</span>
+                <span id="local-time" class="text-[11px] text-slate-400">--:--</span>
+            </div>
+            
+            <div class="grid grid-cols-3 gap-3 text-center">
+                <div class="bg-orange-50 rounded-xl p-3 border border-orange-100">
+                    <span class="block text-xs text-orange-600 font-medium">Nhiệt độ</span>
+                    <span id="temp" class="text-xl font-bold text-orange-700 mt-1 block">--°C</span>
+                </div>
+                <div class="bg-blue-50 rounded-xl p-3 border border-blue-100">
+                    <span class="block text-xs text-blue-600 font-medium">Độ ẩm khí</span>
+                    <span id="humidity" class="text-xl font-bold text-blue-700 mt-1 block">--%</span>
+                </div>
+                <div class="bg-teal-50 rounded-xl p-3 border border-teal-100">
+                    <span class="block text-xs text-teal-600 font-medium">Lượng mưa</span>
+                    <span id="rain" class="text-xl font-bold text-teal-700 mt-1 block">-- mm</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl shadow-sm p-5 border border-emerald-200 relative overflow-hidden">
+            <div class="absolute top-0 right-0 bg-emerald-600 text-white text-[10px] uppercase font-bold px-3 py-1 rounded-bl-xl shadow-sm">
+                Gemini 2.5 Flash
+            </div>
+            
+            <h2 class="text-base font-bold text-emerald-800 flex items-center gap-2 mb-3">
+                🤖 Trí Tuệ Nhân Tạo Khuyến Nghị
+            </h2>
+            
+            <p id="ai-recommendation" class="text-sm text-slate-700 leading-relaxed min-h-[80px]">
+                Đang kết nối với bộ não AI để phân tích dữ liệu thời tiết Mê Linh...
+            </p>
+        </div>
+
+        <button onclick="loadFarmData()" class="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition duration-200 active:scale-95 text-sm flex items-center justify-center gap-2">
+            🔄 Cập Nhật Dữ Liệu Thực Tế
+        </button>
+
+    </main>
+
+    <footer class="text-center py-4 text-[11px] text-slate-400 border-t border-slate-200 bg-white">
+        Dự án DePIN Smart Farm Mê Linh v1.0
+    </footer>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:8000/api/v1";
+
+        async function loadFarmData() {
+            const aiTextEl = document.getElementById("ai-recommendation");
+            aiTextEl.innerText = "⏳ AI đang bấm quẻ phân tích thời tiết Mê Linh...";
+
+            try {
+                // Gọi API lấy dữ liệu AI khuyến nghị (Endpoint linh hồn)
+                const res = await fetch(`${API_BASE}/weather/recommendation`);
+                const result = await res.json();
+
+                if (result.status === "success") {
+                    // 1. Đổ dữ liệu trạm và thời gian
+                    document.getElementById("station-name").innerText = `📍 ${result.station_name}`;
+                    document.getElementById("local-time").innerText = result.local_time || "Vừa xong";
+
+                    // 2. Đổ các chỉ số khí tượng
+                    document.getElementById("temp").innerText = `${result.metrics_analyzed.temperature_celsius}°C`;
+                    document.getElementById("humidity").innerText = `${result.metrics_analyzed.humidity_percent}%`;
+                    document.getElementById("rain").innerText = `${result.metrics_analyzed.rain_mm} mm`;
+
+                    // 3. Đổ lời khuyên của Gemini AI
+                    aiTextEl.innerText = result.ai_decision.recommendation;
+                } else {
+                    aiTextEl.innerText = "❌ Không thể bốc dữ liệu từ hệ thống API.";
+                }
+            } catch (error) {
+                console.error(error);
+                aiTextEl.innerText = "❌ Lỗi kết nối! Hãy chắc chắn sếp đã bật Server Uvicorn và cấu hình CORS.";
+            }
+        }
+
+        // Tự động kích hoạt gọi dữ liệu ngay khi vừa mở trang web
+        window.onload = loadFarmData;
+    </script>
+</body>
+</html>
