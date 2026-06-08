@@ -2,7 +2,7 @@ import os
 import sys
 from dotenv import load_dotenv
 
-# 🔥 SỬA TẠI ĐÂY: Dùng insert(0, ...) để ép đường dẫn gốc lên quyền ưu tiên CAO NHẤT
+# 🔥 Đóng đinh đường dẫn tuyệt đối từ gốc lên quyền ưu tiên CAO NHẤT để diệt tận gốc lỗi ModuleNotFoundError
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)

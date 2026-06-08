@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import motor.motor_asyncio
 import requests
 
-# 1. CHUỖI KẾT NỐI MONGODB ATLAS (Ông nhớ thay mật khẩu chuẩn vào chữ MAT_KHAU_CUA_ONG nhé)
+# 1. CHUỖI KẾT NỐI MONGODB ATLAS
 MONGO_DETAILS = "mongodb+srv://saicongphihung07072002_db_user:wd1jPuIX0b09GGCU@cluster0.43eiy0n.mongodb.net/?appName=Cluster0"
 
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_DETAILS)
@@ -14,7 +14,7 @@ weather_collection = db.weather_logs
 LATITUDE = 21.18
 LONGITUDE = 105.71
 
-# 3. Tần suất cào dữ liệu (Tính bằng giây) - Hiện tại đang để 15 phút một lần
+# 3. Tần suất cào dữ liệu (Tính bằng giây) - 15 phút một lần
 FETCH_INTERVAL = 900
 
 
@@ -48,7 +48,7 @@ async def fetch_and_save_weather():
                 api_data = response.json()
                 current = api_data["current"]
 
-                # Cấu trúc Schema chuẩn hóa - Đã sửa lỗi chữ vàng bằng timezone.utc
+                # Cấu trúc Schema chuẩn hóa
                 weather_doc = {
                     "station_name": "Trạm khí tượng vĩ mô Mê Linh",
                     "coordinates": {"lat": LATITUDE, "lon": LONGITUDE},
