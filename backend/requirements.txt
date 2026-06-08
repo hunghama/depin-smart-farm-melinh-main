@@ -2,3 +2,4 @@ pymongo==4.6.3
 dnspython==2.6.1
 fastapi
 uvicorn
+python-dotenv
