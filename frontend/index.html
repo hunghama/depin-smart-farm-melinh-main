@@ -62,7 +62,8 @@
     </footer>
 
     <script>
-        const API_BASE = "http://127.0.0.1:8000/api/v1";
+        // 🔥 ĐÃ ĐỔI: Nhổ neo API gốc từ máy cục bộ (Local) lên thẳng máy chủ Render toàn cầu
+        const API_BASE = "https://depin-smart-farm-melinh-main.onrender.com/api/v1";
 
         async function loadFarmData() {
             const aiTextEl = document.getElementById("ai-recommendation");
@@ -90,7 +91,7 @@
                 }
             } catch (error) {
                 console.error(error);
-                aiTextEl.innerText = "❌ Lỗi kết nối! Hãy chắc chắn sếp đã bật Server Uvicorn và cấu hình CORS.";
+                aiTextEl.innerText = "❌ Lỗi kết nối đám mây! Không thể bốc được dữ liệu từ Render Server.";
             }
         }
 
