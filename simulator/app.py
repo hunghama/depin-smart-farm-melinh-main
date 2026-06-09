@@ -1,15 +1,23 @@
 import asyncio
 from datetime import datetime, timezone
+import os  # Thêm dòng này
 import motor.motor_asyncio
 import requests
+from dotenv import load_dotenv  # Thêm dòng này
 
-# 1. CHUỖI KẾT NỐI MONGODB ATLAS
-MONGO_DETAILS = "mongodb+srv://saicongphihung07072002_db_user:wd1jPuIX0b09GGCU@cluster0.43eiy0n.mongodb.net/?appName=Cluster0"
+# Nạp file .env từ thư mục gốc
+load_dotenv()
+
+# 1. Bốc chuỗi kết nối từ biến môi trường (Không sợ lộ mật khẩu nữa)
+MONGO_DETAILS = os.getenv("MONGO_DETAILS")
+
+# Nếu chạy local mà file .env chưa nhận, dùng tạm bản dự phòng này
+if not MONGO_DETAILS:
+    MONGO_DETAILS = "mongodb+srv://saicongphihung07072002_db_user:wd1jPuIX0b09GGCU@cluster0.43eiy0n.mongodb.net/?appName=Cluster0"
 
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_DETAILS)
 db = client.SmartFarmMeLinh
 weather_collection = db.weather_logs
-
 # 2. Tọa độ địa lý khu vực huyện Mê Linh, Hà Nội
 LATITUDE = 21.18
 LONGITUDE = 105.71
