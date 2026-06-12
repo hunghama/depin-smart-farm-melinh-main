@@ -1,54 +1,35 @@
 import asyncio
-from datetime import datetime, timezone
-import os  # Thêm dòng này
-import motor.motor_asyncio
+from datetime import datetime
 import requests
-from dotenv import load_dotenv  # Thêm dòng này
 
-# Nạp file .env từ thư mục gốc
-load_dotenv()
+# =====================================================================
+# 📡 CẤU HÌNH ĐƯỜNG DẪN API TRẠM GỐC
+# =====================================================================
+API_URL = "http://127.0.0.1:8000/api/v1/weather"
+# Khi nào deploy lên Render, ông mở dấu # ở dòng dưới ra nhé:
+# API_URL = "https://depin-smart-farm-melinh-main.onrender.com/api/v1/weather"
 
-# 1. Bốc chuỗi kết nối từ biến môi trường (Không sợ lộ mật khẩu nữa)
-MONGO_DETAILS = os.getenv("MONGO_DETAILS")
-
-# Nếu chạy local mà file .env chưa nhận, dùng tạm bản dự phòng này
-if not MONGO_DETAILS:
-    MONGO_DETAILS = "mongodb+srv://saicongphihung07072002_db_user:wd1jPuIX0b09GGCU@cluster0.43eiy0n.mongodb.net/?appName=Cluster0"
-
-client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_DETAILS)
-db = client.SmartFarmMeLinh
-weather_collection = db.weather_logs
-# 2. Tọa độ địa lý khu vực huyện Mê Linh, Hà Nội
+# Tọa độ địa lý khu vực huyện Mê Linh, Hà Nội
 LATITUDE = 21.18
 LONGITUDE = 105.71
+FETCH_INTERVAL = 600  # Thời tiết vĩ mô quét 10 phút (600 giây) một lần là chuẩn bài
 
-# 3. Tần suất cào dữ liệu (Tính bằng giây) - 15 phút một lần
-FETCH_INTERVAL = 900
-
-
-async def fetch_and_save_weather():
+async def fetch_and_send_macro_weather():
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
-        "current": [
-            "temperature_2m",
-            "relative_humidity_2m",
-            "rain",
-            "weather_code",
-        ],
-        "hourly": "uv_index",
+        "current": ["temperature_2m", "relative_humidity_2m", "rain", "weather_code"],
         "timezone": "Asia/Bangkok",
     }
 
-    print("🚀 Con bot cào dữ liệu thời tiết Smart Farm Mê Linh đã kích hoạt thành công!")
-    print(f"📡 Tần suất quét: {FETCH_INTERVAL} giây/lần. Đang chạy ngầm...")
-    print("-" * 60)
+    print("🌤️ [SKY BOT] Con bot cào thời tiết vĩ mô Mê Linh đã khởi động!")
+    print(f"📡 API Nhắm bắn: {API_URL}\n" + "-"*50)
 
     while True:
         try:
             current_time = datetime.now().strftime("%H:%M:%S")
-            print(f"⏰ [{current_time}] Đang kết nối trạm vệ tinh lấy dữ liệu...")
+            print(f"⏰ [{current_time}] Đang đồng bộ dữ liệu từ trạm vệ tinh Open-Meteo...")
 
             response = requests.get(url, params=params)
 
@@ -56,39 +37,33 @@ async def fetch_and_save_weather():
                 api_data = response.json()
                 current = api_data["current"]
 
-                # Cấu trúc Schema chuẩn hóa
-                weather_doc = {
+                # Đóng gói gói tin thời tiết vĩ mô gửi sang Backend
+                payload = {
                     "station_name": "Trạm khí tượng vĩ mô Mê Linh",
-                    "coordinates": {"lat": LATITUDE, "lon": LONGITUDE},
-                    "timestamp": datetime.now(timezone.utc),
-                    "local_time": current["time"],
-                    "temperature": current["temperature_2m"],
-                    "humidity": current["relative_humidity_2m"],
-                    "rain": current["rain"],
-                    "weather_code": current["weather_code"],
-                    "raw_forecast_data": api_data,
+                    "temperature": float(current["temperature_2m"]),
+                    "humidity": float(current["relative_humidity_2m"]),
+                    "rain": float(current["rain"]),
+                    "weather_code": int(current["weather_code"])
                 }
 
-                result = await weather_collection.insert_one(weather_doc)
+                print(f"   📊 Thời tiết trời: {payload['temperature']}°C | Ẩm: {payload['humidity']}% | Mưa: {payload['rain']}mm")
+                print("   📥 Đang đẩy dữ liệu vĩ mô sang Backend...")
 
-                print(
-                    f"✅ Đã găm dữ liệu vào MongoDB thành công! Document_ID: {result.inserted_id}"
-                )
-                print(
-                    f"📊 Chỉ số thực tế: {weather_doc['temperature']}°C | Độ ẩm: {weather_doc['humidity']}% | Lượng mưa: {weather_doc['rain']}mm"
-                )
+                # Bắn HTTP POST sang Backend cửa khẩu
+                backend_res = requests.post(API_URL, json=payload, timeout=5)
 
+                if backend_res.status_code in [200, 201]:
+                    print(f"   🟩 Backend phản hồi: Đồng bộ thời tiết vĩ mô thành công!")
+                else:
+                    print(f"   🚨 Backend từ chối ({backend_res.status_code}): {backend_res.text}")
             else:
-                print(
-                    f"❌ Lỗi kết nối API Open-Meteo. Mã phản hồi: {response.status_code}"
-                )
+                print(f"   ❌ Lỗi kết nối Open-Meteo: {response.status_code}")
 
         except Exception as e:
-            print(f"❌ Sự cố luồng cào dữ liệu: {e}")
+            print(f"   ⚠️ [Error] Sự cố luồng cào thời tiết: {e}")
 
-        print(f"😴 Chờ {FETCH_INTERVAL} giây cho lần cập nhật kế tiếp...\n")
+        print(f"😴 Chờ {FETCH_INTERVAL} giây cho chu kỳ tiếp theo...\n" + "-"*50)
         await asyncio.sleep(FETCH_INTERVAL)
 
-
 if __name__ == "__main__":
-    asyncio.run(fetch_and_save_weather())
+    asyncio.run(fetch_and_send_macro_weather())
