@@ -12,7 +12,7 @@ load_dotenv()
 
 from fastapi import FastAPI, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # Thư viện mở khóa CORS
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage  # Nạp module lưu trữ của ông
 
@@ -37,30 +37,63 @@ except Exception as e:
     print(f"⚠️ Cảnh báo: Chưa cấu hình được Gemini Client (Thiếu API Key): {e}")
     ai_client = None
 
+
+# =====================================================================
+# 🛡️ ĐẰNG BẢO MẬT: KHUNG XÁC THỰC DỮ LIỆU ĐẦU VÀO (PYDANTIC SCHEMAS)
+# =====================================================================
+
 class SensorDataInput(BaseModel):
-    sensor_id: str
-    temperature: float
-    soil_moisture: float
-    timestamp: int
-    data_hash: str
+    """Schema ép kiểu dữ liệu vi khí hậu từ luống đất (ESP32 thật hoặc giả lập phần cứng)"""
+    sensor_id: str = Field(..., example="ESP32_MELINH_01")
+    temperature: float = Field(..., ge=-10.0, le=60.0, description="Nhiệt độ đất (°C)")
+    soil_moisture: float = Field(..., ge=0.0, le=100.0, description="Độ ẩm đất (%)")
+    timestamp: int = Field(..., description="Epoch timestamp từ thiết bị")
+    data_hash: str = Field(..., description="Mã băm SHA-256")
+
+
+class WeatherDataInput(BaseModel):
+    """Schema ép kiểu dữ liệu khí tượng vĩ mô từ trên trời (Bot cào vệ tinh Open-Meteo)"""
+    station_name: str = Field(..., example="Trạm khí tượng vĩ mô Mê Linh")
+    temperature: float = Field(..., ge=-10.0, le=60.0, description="Nhiệt độ không khí (°C)")
+    humidity: float = Field(..., ge=0.0, le=100.0, description="Độ ẩm không khí (%)")
+    rain: float = Field(..., ge=0.0, description="Lượng mưa (mm)")
+    weather_code: int = Field(..., description="Mã trạng thái thời tiết")
 
 
 # =====================================================================
-# 💾 CỔNG NHẬN DATA PHẦN CỨNG (Để dành làm gói VIP cắm ruộng sau này)
+# 💾 CỔNG NHẬN DATA PHẦN CỨNG (DỮ LIỆU ĐẤT)
 # =====================================================================
 @app.post("/api/v1/sensor", status_code=status.HTTP_201_CREATED)
 def receive_sensor_data(data: SensorDataInput):
+    """Cổng tiếp nhận Telemetry thô từ luống đất gửi lên"""
     packet = data.model_dump()
-    is_hash_valid = True # Tạm thời giả định qua chốt bảo mật DePIN
+    is_hash_valid = True  # Tạm thời giả định qua chốt bảo mật DePIN
     
     if not is_hash_valid:
         raise HTTPException(status_code=403, detail="Mã băm DePIN không hợp lệ!")
         
     db_saved = storage.save_sensor_data(packet)
     if not db_saved:
-        return {"message": "Dữ liệu được tiếp nhận nhưng lưu trữ tạm thời gặp sự cố", "status": "fallback"}
+        raise HTTPException(status_code=500, detail="Lưu trữ dữ liệu cảm biến đất gặp sự cố")
         
-    return {"message": "Dữ liệu Mê Linh đã ghi nhận thành công vào MongoDB Atlas!", "status": "success"}
+    return {"message": "Dữ liệu mặt đất Mê Linh ghi nhận thành công!", "status": "success"}
+
+
+# =====================================================================
+# 🌤️ ĐÃ THÊM MỚI: CỔNG NHẬN DATA KHÍ TƯỢNG VĨ MÔ (DỮ LIỆU TRỜI)
+# =====================================================================
+@app.post("/api/v1/weather", status_code=status.HTTP_201_CREATED)
+def receive_weather_data(data: WeatherDataInput):
+    """Cổng kết nối tiếp nhận dữ liệu thời tiết trên trời do Sky Bot bắn về"""
+    packet = data.model_dump()
+    
+    # Thực hiện lưu gói tin thời tiết vào database 
+    # (Nếu file storage.py của ông dùng hàm khác tên, hãy sửa lại cho khớp nhé)
+    db_saved = storage.save_weather_data(packet)
+    if not db_saved:
+        raise HTTPException(status_code=500, detail="Lưu trữ dữ liệu thời tiết vĩ mô gặp sự cố")
+        
+    return {"message": "Dữ liệu thời tiết trên trời Mê Linh đã đồng bộ thành công!", "status": "success"}
 
 
 # =====================================================================
@@ -69,41 +102,24 @@ def receive_sensor_data(data: SensorDataInput):
 
 @app.get("/api/v1/weather/latest")
 def get_latest_weather():
-    """
-    Endpoint bốc dữ liệu thời tiết thô mới nhất do bot cào về 
-    để phục vụ giao diện Web App.
-    """
+    """Endpoint bốc dữ liệu thời tiết vĩ mô mới nhất phục vụ giao diện Web App"""
     weather_data = storage.get_latest_weather_data()
-    
     if not weather_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Kho dữ liệu thời tiết trống! Hãy kiểm tra lại con bot cào dữ liệu."
-        )
-        
+        raise HTTPException(status_code=404, detail="Kho dữ liệu thời tiết vĩ mô trống!")
     return {"status": "success", "data": weather_data}
 
 
 @app.get("/api/v1/weather/recommendation")
 def get_ai_recommendation():
-    """
-    Linh hồn hệ thống: Gọi thẳng não thật Gemini API đọc data thời tiết để nhả lời khuyên thực chiến.
-    Nếu API gặp sự cố hoặc hết hạn mức, hệ thống tự động tụt về Hệ chuyên gia dự phòng (If/Else).
-    """
+    """Linh hồn hệ thống: Gọi thẳng não thật Gemini API hoặc Hệ chuyên gia dự phòng"""
     weather_data = storage.get_latest_weather_data()
-    
     if not weather_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Thiếu dữ liệu thời tiết thực tế để AI chạy phân tích!"
-        )
+        raise HTTPException(status_code=404, detail="Thiếu dữ liệu thời tiết thực tế để AI chạy phân tích!")
         
-    # Bóc tách chuẩn các trường dữ liệu theo đúng Schema mà bot đang cào lên mây
     temp = weather_data.get("temperature", 25.0)
     humidity = weather_data.get("humidity", 70.0)
     rain = weather_data.get("rain", 0.0)
     
-    # 🤖 BIẾN THỂ 1: Sử dụng não thật Gemini API (Nếu đã cấu hình Key chuẩn)
     if ai_client and os.getenv("GEMINI_API_KEY"):
         prompt = f"""
         Bạn là một chuyên gia nông nghiệp công nghệ cao am hiểu sâu sắc về canh tác hoa hồng, hoa cúc, đào Tết và rau màu tại huyện Mê Linh, Hà Nội.
@@ -123,20 +139,13 @@ def get_ai_recommendation():
                 "status": "success",
                 "ai_engine": "Gemini 2.5 Flash (Dynamic AI)",
                 "station_name": weather_data.get("station_name"),
-                "metrics_analyzed": {
-                    "temperature_celsius": temp,
-                    "humidity_percent": humidity,
-                    "rain_mm": rain
-                },
-                "ai_decision": {
-                    "recommendation": response.text.strip(),
-                    "action_code": "GEMINI_DYNAMIC"
-                }
+                "metrics_analyzed": {"temperature_celsius": temp, "humidity_percent": humidity, "rain_mm": rain},
+                "ai_decision": {"recommendation": response.text.strip(), "action_code": "GEMINI_DYNAMIC"}
             }
         except Exception as e:
             print(f"⚠️ Sự cố gọi Gemini API (Chuyển luồng về Hệ chuyên gia dự phòng): {e}")
 
-    # 🪵 BIẾN THỂ 2: Hệ chuyên gia dự phòng Rule-based (If/Else cố định)
+    # Hệ chuyên gia dự phòng Rule-based (If/Else cố định)
     recommendation = "🌤️ Thời tiết đang rất lý tưởng. Bà con tranh thủ bón phân định kỳ và chăm sóc cây trồng bình thường."
     action_code = "STATUS_OK"
     
@@ -157,15 +166,8 @@ def get_ai_recommendation():
         "status": "success",
         "ai_engine": "Rule-based Expert System (Fallback Mode)",
         "station_name": weather_data.get("station_name"),
-        "metrics_analyzed": {
-            "temperature_celsius": temp,
-            "humidity_percent": humidity,
-            "rain_mm": rain
-        },
-        "ai_decision": {
-            "recommendation": recommendation,
-            "action_code": action_code
-        }
+        "metrics_analyzed": {"temperature_celsius": temp, "humidity_percent": humidity, "rain_mm": rain},
+        "ai_decision": {"recommendation": recommendation, "action_code": action_code}
     }
 
 
