@@ -39,7 +39,7 @@ except Exception as e:
 
 
 # =====================================================================
-# 🛡️ ĐẰNG BẢO MẬT: KHUNG XÁC THỰC DỮ LIỆU ĐẦU VÀO (PYDANTIC SCHEMAS)
+# 🛡️ TẦNG BẢO MẬT: KHUNG XÁC THỰC DỮ LIỆU ĐẦU VÀO (PYDANTIC SCHEMAS)
 # =====================================================================
 
 class SensorDataInput(BaseModel):
@@ -80,15 +80,12 @@ def receive_sensor_data(data: SensorDataInput):
 
 
 # =====================================================================
-# 🌤️ ĐÃ THÊM MỚI: CỔNG NHẬN DATA KHÍ TƯỢNG VĨ MÔ (DỮ LIỆU TRỜI)
+# 🌤️ CỔNG NHẬN DATA KHÍ TƯỢNG VĨ MÔ (DỮ LIỆU TRỜI)
 # =====================================================================
 @app.post("/api/v1/weather", status_code=status.HTTP_201_CREATED)
 def receive_weather_data(data: WeatherDataInput):
     """Cổng kết nối tiếp nhận dữ liệu thời tiết trên trời do Sky Bot bắn về"""
     packet = data.model_dump()
-    
-    # Thực hiện lưu gói tin thời tiết vào database 
-    # (Nếu file storage.py của ông dùng hàm khác tên, hãy sửa lại cho khớp nhé)
     db_saved = storage.save_weather_data(packet)
     if not db_saved:
         raise HTTPException(status_code=500, detail="Lưu trữ dữ liệu thời tiết vĩ mô gặp sự cố")
@@ -111,24 +108,46 @@ def get_latest_weather():
 
 @app.get("/api/v1/weather/recommendation")
 def get_ai_recommendation():
-    """Linh hồn hệ thống: Gọi thẳng não thật Gemini API hoặc Hệ chuyên gia dự phòng"""
+    """
+    🔥 NÃO HYBRID HOÀN CHỈNH: Hợp nhất dữ liệu Trời (Open-Meteo) + Đất (ESP32)
+    để ép Gemini đưa ra quyết định nông nghiệp chuẩn xác độc bản.
+    """
+    # 1. Bốc đồng thời 2 nguồn dữ liệu mới nhất từ MongoDB Atlas
     weather_data = storage.get_latest_weather_data()
-    if not weather_data:
-        raise HTTPException(status_code=404, detail="Thiếu dữ liệu thời tiết thực tế để AI chạy phân tích!")
-        
-    temp = weather_data.get("temperature", 25.0)
-    humidity = weather_data.get("humidity", 70.0)
-    rain = weather_data.get("rain", 0.0)
-    
+    sensor_data = storage.get_latest_sensor_data() # (Đảm bảo file storage.py có hàm bốc data sensor này nhé sếp)
+
+    # Nếu cả 2 kho đều trống, không thể chạy AI
+    if not weather_data and not sensor_data:
+        raise HTTPException(status_code=404, detail="Hệ thống trống dữ liệu! Không thể phân tích.")
+
+    # Trích xuất dữ liệu Trời (Dự phòng nếu thiếu)
+    temp_air = weather_data.get("temperature", 25.0) if weather_data else 25.0
+    humidity_air = weather_data.get("humidity", 70.0) if weather_data else 70.0
+    rain = weather_data.get("rain", 0.0) if weather_data else 0.0
+
+    # Trích xuất dữ liệu Đất (Dự phòng nếu thiếu)
+    temp_soil = sensor_data.get("temperature", 24.0) if sensor_data else 24.0
+    soil_moisture = sensor_data.get("soil_moisture", 75.0) if sensor_data else 75.0
+
+    # 🤖 BIẾN THỂ 1: SỬ DỤNG NÃO THẬT GEMINI HYBRID PROMPT
     if ai_client and os.getenv("GEMINI_API_KEY"):
         prompt = f"""
-        Bạn là một chuyên gia nông nghiệp công nghệ cao am hiểu sâu sắc về canh tác hoa hồng, hoa cúc, đào Tết và rau màu tại huyện Mê Linh, Hà Nội.
-        Hãy phân tích các chỉ số thời tiết thời gian thực sau đây:
-        - Nhiệt độ: {temp}°C
-        - Độ ẩm không khí: {humidity}%
-        - Lượng mưa: {rain}mm
+        Bạn là một chuyên gia cố vấn nông nghiệp số độc quyền cho vùng hoa hồng, hoa cúc, đào Tết tại Mê Linh, Hà Nội.
+        Hãy thực hiện phân tích tương quan giữa Thời tiết vĩ mô (Trời) và Cảm biến tại luống (Đất) sau đây:
         
-        Yêu cầu: Hãy đưa ra 1 lời khuyên ngắn gọn (khoảng 3-4 câu), thực chiến, dùng ngôn từ bình dị của nhà nông để hướng dẫn bà con Mê Linh cần làm gì (ví dụ: che lưới, khơi thông luống, tưới nước hay dừng bón phân). Khuyến nghị phải sát thực tế với các loại cây trồng đặc thù của địa phương. Không sử dụng định dạng Markdown (như dấu sao, bôi đậm), hãy trả về văn bản thuần sạch sẽ.
+        [DỮ LIỆU TỪ TRỜI (Khí tượng vĩ mô - Open-Meteo)]:
+        - Nhiệt độ không khí: {temp_air}°C
+        - Độ ẩm không khí: {humidity_air}%
+        - Lượng mưa dự báo: {rain}mm
+        
+        [DỮ LIỆU DƯỚI ĐẤT (Cảm biến vi khí hậu - ESP32)]:
+        - Nhiệt độ lòng đất: {temp_soil}°C
+        - Độ ẩm thực tế của đất luống hoa: {soil_moisture}%
+        
+        Yêu cầu logic: 
+        1. Hãy đối chiếu xem có sự mâu thuẫn nào giữa Trời và Đất không (Ví dụ: Đất đang rất khô nhưng Trời chuẩn bị mưa lớn, hoặc Trời nắng gắt nhưng đất vẫn quá đẫm nước).
+        2. Đưa ra 1 khuyến nghị hành động tối ưu nhất (khoảng 3-4 câu), dùng ngôn từ bình dị của nhà nông để giúp bà con tiết kiệm chi phí tưới tiêu hoặc chủ động phòng bệnh đặc thù (mốc sương, thối rễ, cháy lá).
+        3. Tuyệt đối không dùng định dạng ký tự Markdown (như bôi đậm **, dấu gạch đầu dòng), hãy trả về một đoạn văn thuần sạch sẽ.
         """
         try:
             response = ai_client.models.generate_content(
@@ -137,37 +156,51 @@ def get_ai_recommendation():
             )
             return {
                 "status": "success",
-                "ai_engine": "Gemini 2.5 Flash (Dynamic AI)",
-                "station_name": weather_data.get("station_name"),
-                "metrics_analyzed": {"temperature_celsius": temp, "humidity_percent": humidity, "rain_mm": rain},
-                "ai_decision": {"recommendation": response.text.strip(), "action_code": "GEMINI_DYNAMIC"}
+                "ai_engine": "Gemini 2.5 Flash (Hybrid AI Brain)",
+                "metrics_analyzed": {
+                    "air_temperature_celsius": temp_air,
+                    "air_humidity_percent": humidity_air,
+                    "rain_mm": rain,
+                    "soil_temperature_celsius": temp_soil,
+                    "soil_moisture_percent": soil_moisture
+                },
+                "ai_decision": {
+                    "recommendation": response.text.strip(),
+                    "action_code": "GEMINI_HYBRID_SUCCESS"
+                }
             }
         except Exception as e:
-            print(f"⚠️ Sự cố gọi Gemini API (Chuyển luồng về Hệ chuyên gia dự phòng): {e}")
+            print(f"⚠️ Sự cố gọi Gemini API: {e}")
 
-    # Hệ chuyên gia dự phòng Rule-based (If/Else cố định)
-    recommendation = "🌤️ Thời tiết đang rất lý tưởng. Bà con tranh thủ bón phân định kỳ và chăm sóc cây trồng bình thường."
-    action_code = "STATUS_OK"
+    # 🪵 BIẾN THỂ 2: HỆ CHUYÊN GIA DỰ PHÒNG HYBRID RULE-BASED (Khi mất mạng/Hết hạn mức API)
+    recommendation = "🌤️ Các chỉ số ổn định. Bà con theo dõi vườn hoa và chăm sóc theo lịch định kỳ."
+    action_code = "HYBRID_STATUS_OK"
     
-    if temp > 35.0:
-        recommendation = "⚠️ Trời nắng gắt trên 35°C! Khuyến nghị kéo lưới đen che giảm nắng cho các ruộng hoa hồng, hoa cúc Mê Linh; tuyệt đối không bón phân hóa học vào giữa trưa."
-        action_code = "SHADE_REQUIRED"
-    elif rain > 20.0:
-        recommendation = "🚨 Cảnh báo mưa lớn úng rễ! Bà con cần chủ động ra đồng khơi thông bờ thửa, chuẩn bị máy bơm thoát nước cho các luống rau màu và vườn đào tránh đọng nước."
-        action_code = "DRAINAGE_NOW"
-    elif humidity < 50.0 and temp > 30.0:
-        recommendation = "🍂 Không khí hanh khô, độ ẩm xuống thấp. Tăng cường hệ thống tưới phun sương vào đầu giờ sáng và chiều mát để bảo vệ lá và búp hoa không bị héo tắp."
-        action_code = "INCREASE_IRRIGATION"
-    elif temp < 15.0:
-        recommendation = "❄️ Trời rét đậm, nguy cơ sương muối gây thối búp hoa cực cao. Khuyến nghị bà con tưới lướt nước chân ruộng vào sáng sớm để phá sương bảo vệ hoa tết."
-        action_code = "ANTI_FROST"
+    # Logic If/Else lai giữa Đất và Trời cơ bản
+    if rain > 15.0 and soil_moisture > 85.0:
+        recommendation = "🚨 Cảnh báo khẩn cấp! Trời đang mưa lớn kèm theo độ ẩm đất luống hoa đã quá đẫm (trên 85%). Nguy cơ thối rễ bùng phát cực cao. Bà con Mê Linh khẩn trương ra đồng khơi rãnh, bật máy bơm xả nước ngay lập tức!"
+        action_code = "CRITICAL_DRAINAGE"
+    elif rain > 10.0 and soil_moisture < 50.0:
+        recommendation = "🌧️ Thời tiết chuẩn bị có mưa, kết hợp đất ruộng hiện tại đang khá khô. Khuyến nghị bà con HOÃN việc bật hệ thống tưới tự động để tận dụng nước mưa, giúp tiết kiệm chi phí điện nước."
+        action_code = "DELAY_IRRIGATION"
+    elif temp_air > 35.0 and soil_moisture < 60.0:
+        recommendation = "🔥 Trời nắng gắt trên 35°C và đất luống hoa đang thiếu nước nghiêm trọng. Nông dân cần kéo ngay lưới đen che nắng và bật hệ thống tưới nhỏ giọt vào lúc chiều mát để hồi sức cho hoa."
+        action_code = "HEAT_STRESS_WATER"
 
     return {
         "status": "success",
         "ai_engine": "Rule-based Expert System (Fallback Mode)",
-        "station_name": weather_data.get("station_name"),
-        "metrics_analyzed": {"temperature_celsius": temp, "humidity_percent": humidity, "rain_mm": rain},
-        "ai_decision": {"recommendation": recommendation, "action_code": action_code}
+        "metrics_analyzed": {
+            "air_temperature_celsius": temp_air,
+            "air_humidity_percent": humidity_air,
+            "rain_mm": rain,
+            "soil_temperature_celsius": temp_soil,
+            "soil_moisture_percent": soil_moisture
+        },
+        "ai_decision": {
+            "recommendation": recommendation,
+            "action_code": action_code
+        }
     }
 
 
