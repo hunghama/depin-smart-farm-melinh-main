@@ -1,5 +1,6 @@
 import os
 import sys
+import requests
 from dotenv import load_dotenv
 
 # 🔥 Đóng đinh đường dẫn tuyệt đối từ gốc lên quyền ưu tiên CAO NHẤT để diệt tận gốc lỗi ModuleNotFoundError
@@ -11,26 +12,25 @@ if root_dir not in sys.path:
 load_dotenv()
 
 from fastapi import FastAPI, status, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # Thư viện mở khóa CORS
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
-from backend.storage import MongoStorage  # Nạp module lưu trữ của ông
+from backend.storage import MongoStorage
 
 # 2. Khởi tạo ứng dụng và lớp lưu trữ dữ liệu
-app = FastAPI(title="Smart Farm Mê Linh API v1 - Pure Software MVP")
+app = FastAPI(title="Smart Farm Mê Linh API v1 - Zalo MVP Edition")
 
-# Cấu hình thông chốt CORS bảo mật để file frontend/index.html bốc được API mà không bị chặn
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cho phép tất cả các nguồn truy cập
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Cho phép mọi phương thức GET, POST,...
-    allow_headers=["*"],  # Cho phép mọi Header truyền lên
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 storage = MongoStorage()
 
-# Khởi tạo Client Gemini (Nó sẽ tự động bốc biến GEMINI_API_KEY trong file .env ra dùng)
+# Khởi tạo Client Gemini
 try:
     ai_client = genai.Client()
 except Exception as e:
@@ -39,21 +39,16 @@ except Exception as e:
 
 
 # =====================================================================
-# 🌤️ XÁC THỰC DỮ LIỆU ĐẦU VÀO KHÍ TƯỢNG VĨ MÔ (PYDANTIC SCHEMA)
+# 🌤️ XÁC THỰC DỮ LIỆU ĐẦU VÀO KHÍ TƯỢNG VĨ MÔ
 # =====================================================================
-
 class WeatherDataInput(BaseModel):
-    """Schema ép kiểu dữ liệu thời tiết từ trên trời (Bot cào vệ tinh Open-Meteo)"""
     station_name: str = Field(..., example="Trạm khí tượng vĩ mô Mê Linh")
-    temperature: float = Field(..., ge=-10.0, le=60.0, description="Nhiệt độ không khí (°C)")
-    humidity: float = Field(..., ge=0.0, le=100.0, description="Độ ẩm không khí (%)")
-    rain: float = Field(..., ge=0.0, description="Lượng mưa (mm)")
+    temperature: float = Field(..., ge=-10.0, le=60.0)
+    humidity: float = Field(..., ge=0.0, le=100.0)
+    rain: float = Field(..., ge=0.0)
     weather_code: int = Field(..., description="Mã trạng thái thời tiết")
 
 
-# =====================================================================
-# 📥 CỔNG NHẬN DATA KHÍ TƯỢNG VĨ MÔ (DỮ LIỆU TRỜI)
-# =====================================================================
 @app.post("/api/v1/weather", status_code=status.HTTP_201_CREATED)
 def receive_weather_data(data: WeatherDataInput):
     """Cổng kết nối tiếp nhận dữ liệu thời tiết từ Sky Bot bắn về"""
@@ -61,95 +56,118 @@ def receive_weather_data(data: WeatherDataInput):
     db_saved = storage.save_weather_data(packet)
     if not db_saved:
         raise HTTPException(status_code=500, detail="Lưu trữ dữ liệu thời tiết gặp sự cố")
-        
     return {"message": "Dữ liệu thời tiết Mê Linh đã đồng bộ thành công!", "status": "success"}
 
 
 # =====================================================================
-# 🚀 ENDPOINT MVP CHÍNH: LẤY DATA & AI CẤY NÃO GEMINI PURE SOFTWARE
+# 📡 PHÂN HỆ KẾT NỐI VÀ BẮN TIN NHẮN TRỰC TIẾP SANG ZALO API
 # =====================================================================
-
-@app.get("/api/v1/weather/latest")
-def get_latest_weather():
-    """Endpoint bốc dữ liệu thời tiết mới nhất phục vụ giao diện Web App"""
-    weather_data = storage.get_latest_weather_data()
-    if not weather_data:
-        raise HTTPException(status_code=404, detail="Kho dữ liệu thời tiết trống!")
-    return {"status": "success", "data": weather_data}
-
-
-@app.get("/api/v1/weather/recommendation")
-def get_ai_recommendation():
-    """
-    🧠 NÃO PURE SOFTWARE: Chỉ dựa vào dữ liệu thời tiết vĩ mô từ API Open-Meteo
-    để đưa ra các cảnh báo thiên tai và khuyến nghị nông nghiệp thực chiến.
-    """
-    # Bốc bản ghi thời tiết mới nhất từ MongoDB Atlas
-    weather_data = storage.get_latest_weather_data()
-
-    if not weather_data:
-        raise HTTPException(status_code=404, detail="Thiếu dữ liệu thời tiết thực tế để AI chạy phân tích!")
+def send_zalo_message(user_zalo_id: str, text: str) -> bool:
+    """Gọi API chính thức của Zalo Official Account để gửi tin nhắn cho người dùng"""
+    url = "https://openapi.zalo.me/v2.0/oa/message"
+    access_token = os.getenv("ZALO_ACCESS_TOKEN")
+    
+    if not access_token:
+        print("⚠️ [Zalo Error] Thiếu cấu hình ZALO_ACCESS_TOKEN trong file .env")
+        return False
         
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": access_token
+    }
+    
+    payload = {
+        "recipient": {"user_id": user_zalo_id},
+        "message": {"text": text}
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=5)
+        res_json = response.json()
+        if res_json.get("error") == 0:
+            print(f"🟩 [Zalo] Đã gửi tin nhắn thành công tới User: {user_zalo_id}")
+            return True
+        else:
+            print(f"❌ [Zalo API Thất bại] Mã lỗi {res_json.get('error')}: {res_json.get('message')}")
+            return False
+    except Exception as e:
+        print(f"🚨 [Zalo Transport Error] Không thể kết nối tới máy chủ Zalo: {e}")
+        return False
+
+
+# =====================================================================
+# 🚀 ĐÃ THÊM: ENDPOINT CHỦ ĐỘNG KÍCH HOẠT PHÁT TIN TƯ VẤN ZALO hàng ngày
+# =====================================================================
+@app.get("/api/v1/zalo/broadcast")
+def trigger_zalo_broadcast():
+    """
+    🔥 ĐỘT PHÁ LỖI MVP: Endpoint chủ động gọi dữ liệu, xin lệnh Gemini 
+    rồi nã thẳng tin nhắn nông nghiệp thực chiến vào Zalo của bà con Mê Linh.
+    """
+    # 1. Bốc dữ liệu thời tiết mới nhất từ MongoDB
+    weather_data = storage.get_latest_weather_data()
+    if not weather_data:
+        raise HTTPException(status_code=404, detail="Hệ thống trống dữ liệu thời tiết, hoãn phát tin Zalo!")
+
     temp = weather_data.get("temperature", 25.0)
     humidity = weather_data.get("humidity", 70.0)
     rain = weather_data.get("rain", 0.0)
-    
-    # 🤖 BIẾN THỂ 1: SỬ DỤNG NÃO THẬT GEMINI API
+
+    # 2. Ép Gemini tạo nội dung thông báo thuần sạch sẽ
+    recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
         prompt = f"""
-        Bạn là một chuyên gia cố vấn nông nghiệp số chuyên sâu cho vùng hoa hồng, hoa cúc, đào Tết tại huyện Mê Linh, Hà Nội.
-        Hãy phân tích các chỉ số khí tượng thời gian thực sau đây để đưa ra khuyến nghị:
-        - Nhiệt độ không khí: {temp}°C
-        - Độ ẩm không khí: {humidity}%
-        - Lượng mưa: {rain}mm
-        
-        Yêu cầu:
-        1. Đưa ra 1 lời khuyên ngắn gọn (khoảng 3-4 câu), thực chiến, dùng ngôn từ bình dị của nhà nông để hướng dẫn bà con Mê Linh cần làm gì đối với ruộng hoa của mình nhằm ứng phó với thời tiết này (ví dụ: che lưới, khơi thông rãnh, tăng/giảm tưới hoặc phun phòng bệnh mốc sương).
-        2. Lời khuyên phải sát với đặc thù canh tác hoa của địa phương.
-        3. Tuyệt đối không sử dụng định dạng Markdown (như dấu sao *, bôi đậm **), hãy trả về văn bản thuần sạch sẽ để hiển thị mượt mà trên tin nhắn SMS/Zalo.
+        Bạn là chuyên gia cố vấn nông nghiệp số cho vùng trồng hoa hồng, hoa cúc, đào Tết tại Mê Linh, Hà Nội.
+        Hãy phân tích chỉ số hiện tại: Nhiệt độ {temp}°C, Độ ẩm {humidity}%, Lượng mưa {rain}mm.
+        Viết 1 bản tin ngắn gọn (3-4 câu), dùng ngôn từ bình dị, mộc mạc của nhà nông hướng dẫn bà con cần làm gì ngay hôm nay để bảo vệ vườn hoa (ví dụ: tưới nước, che lưới, khơi rãnh hay phun thuốc phòng bệnh).
+        ⚠️ Quy định nghiêm ngặt: Tuyệt đối không dùng bất kỳ ký tự bôi đậm **, dấu gạch đầu dòng, hay ký hiệu dạng Markdown. Chỉ trả về một đoạn văn thuần duy nhất để gửi qua SMS/Zalo không bị lỗi phông chữ.
         """
         try:
             response = ai_client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=prompt,
             )
-            return {
-                "status": "success",
-                "ai_engine": "Gemini 2.5 Flash (Pure Software MVP)",
-                "station_name": weather_data.get("station_name"),
-                "metrics_analyzed": {"temperature": temp, "humidity": humidity, "rain": rain},
-                "ai_decision": {"recommendation": response.text.strip(), "action_code": "GEMINI_PURE_SUCCESS"}
-            }
+            recommendation_text = response.text.strip()
         except Exception as e:
             print(f"⚠️ Sự cố gọi Gemini API: {e}")
 
-    # 🪵 BIẾN THỂ 2: HỆ CHUYÊN GIA DỰ PHÒNG RULE-BASED (Khi mất mạng/Hết hạn mức API)
-    recommendation = "🌤️ Thời tiết đang khá lý tưởng. Bà con tranh thủ bón phân định kỳ và chăm sóc ruộng hoa bình thường."
-    action_code = "PURE_STATUS_OK"
+    # Fallback nếu mất API Key Gemini
+    if not recommendation_text:
+        recommendation_text = f"🌤️ Bản tin Smart Farm Mê Linh: Hiện tại nhiệt độ khoảng {temp}°C, độ ẩm {humidity}%. Thời tiết ổn định, bà con tranh thủ chăm sóc vườn hoa và theo dõi sát sao tình hình sâu bệnh định kỳ."
+
+    # 3. Đóng gói lời nhắn hoàn chỉnh
+    final_message = f"📢 BẢN TIN SÁNG SMART FARM MÊ LINH\n\n{recommendation_text}"
+
+    # 4. Lấy danh sách ID Zalo người nhận (Giai đoạn MVP test, cấu hình ID của sếp trong file .env trước nhé)
+    target_user = os.getenv("ZALO_TEST_USER_ID")
     
-    if temp > 35.0:
-        recommendation = "⚠️ Trời nắng gắt trên 35°C! Khuyến nghị kéo lưới đen che giảm nắng cho các ruộng hoa hồng, hoa cúc Mê Linh; tuyệt đối không bón phân hóa học vào giữa trưa gắt."
-        action_code = "SHADE_REQUIRED"
-    elif rain > 20.0:
-        recommendation = "🚨 Cảnh báo mưa lớn úng rễ! Bà con cần chủ động ra đồng khơi thông bờ thửa, chuẩn bị máy bơm thoát nước cho các luống hoa, tránh đọng nước gây thối gốc."
-        action_code = "DRAINAGE_NOW"
-    elif humidity < 50.0 and temp > 30.0:
-        recommendation = "🍂 Không khí hanh khô, độ ẩm xuống thấp. Tăng cường bật hệ thống tưới phun sương vào đầu giờ sáng và chiều mát để bảo vệ búp hoa không bị héo tắp."
-        action_code = "INCREASE_IRRIGATION"
-    elif temp < 15.0:
-        recommendation = "❄️ Trời rét đậm, nguy cơ sương muối gây thối búp hoa cực cao. Khuyến nghị bà con tưới lướt nước chân ruộng vào sáng sớm để phá sương bảo vệ hoa."
-        action_code = "ANTI_FROST"
+    if not target_user:
+        return {
+            "status": "dry_run_success",
+            "message": "Đã tạo bản tin thành công nhưng chưa cấu hình ZALO_TEST_USER_ID để bắn tin đi.",
+            "preview_content": final_message
+        }
 
-    return {
-        "status": "success",
-        "ai_engine": "Rule-based Expert System (Pure Software Fallback)",
-        "station_name": weather_data.get("station_name"),
-        "metrics_analyzed": {"temperature": temp, "humidity": humidity, "rain": rain},
-        "ai_decision": {"recommendation": recommendation, "action_code": action_code}
-    }
+    # Tiến hành nã đạn qua Zalo
+    is_sent = send_zalo_message(user_zalo_id=target_user, text=final_message)
+    
+    if is_sent:
+        return {"status": "success", "message": "Bản tin AI đã được gửi trực tiếp tới Zalo người dùng thành công!"}
+    else:
+        raise HTTPException(status_code=500, detail="Lưu bản tin thành công nhưng cổng API Zalo từ chối gửi")
 
 
-# 3. Bộ kích hoạt chạy Server trực tiếp dưới máy local
+# =====================================================================
+# 🔍 CÁC ENDPOINT ĐỌC DATA TRUYỀN THỐNG PHỤC VỤ WEB APP
+# =====================================================================
+@app.get("/api/v1/weather/latest")
+def get_latest_weather():
+    weather_data = storage.get_latest_weather_data()
+    if not weather_data:
+        raise HTTPException(status_code=404, detail="Kho dữ liệu trống!")
+    return {"status": "success", "data": weather_data}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True)
