@@ -1,6 +1,7 @@
 import os
 import sys
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 
 # 🔥 Đóng đinh đường dẫn tuyệt đối từ gốc lên quyền ưu tiên CAO NHẤT
@@ -38,7 +39,7 @@ except Exception as e:
 
 
 # =====================================================================
-# 🌤️ RECEIVE WEATHER DATA FROM SKY BOT
+# 🌤️ RECEIVE WEATHER DATA FROM MANUAL INPUT (OPTIONAL)
 # =====================================================================
 class WeatherDataInput(BaseModel):
     station_name: str = Field(..., example="Trạm khí tượng vĩ mô Mê Linh")
@@ -58,10 +59,10 @@ def receive_weather_data(data: WeatherDataInput):
 
 
 # =====================================================================
-# 📡 PHÂN HỆ BẮN TIN NHẮN VỀ TELEGRAM ADMIN (CONCIERGE FLOW)
+# 📡 PHÂN HỆ BẮN TIN NHẮN VỀ TELEGRAM ADMIN
 # =====================================================================
 def send_telegram_message(text: str) -> bool:
-    """Gọi API Telegram để nã bản tin tư vấn về máy của Hùng để chuẩn bị copy sang Zalo"""
+    """Gọi API Telegram để nã bản tin tư vấn về máy của Hùng"""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
@@ -90,15 +91,54 @@ def send_telegram_message(text: str) -> bool:
 
 
 # =====================================================================
-# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY
+# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (CẢI TIẾN)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast():
     """
-    🔥 CONCIERGE MVP: Bốc dữ liệu, hỏi Gemini, bắn bản tin thuần sạch sẽ 
-    về Telegram của sếp để sếp copy nã thẳng vào các nhóm Zalo Mê Linh.
+    🔥 CONCIERGE FLOW TỰ ĐỘNG HOÀN TOÀN: 
+    1. Tự động gọi API Open-Meteo lấy thời tiết THẬT của Mê Linh lúc bấm.
+    2. Găm dữ liệu thật vào MongoDB Atlas để lưu trữ lịch sử.
+    3. Triệu hồi Gemini phân tích dữ liệu thật và viết bản tin mộc mạc.
+    4. Bắn thẳng bản tin về Telegram để chuẩn bị Copy-Paste sang Zalo.
     """
-    # 1. Bốc dữ liệu thời tiết mới nhất từ MongoDB
+    
+    # ──> BƯỚC 0: CHỦ ĐỘNG CÀO THỜI TIẾT THỜI GIAN THỰC MÊ LINH <──
+    try:
+        url_open_meteo = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": 21.18,   # Tọa độ chuẩn huyện Mê Linh, Hà Nội
+            "longitude": 105.71,
+            "current": ["temperature_2m", "relative_humidity_2m", "rain", "weather_code"],
+            "timezone": "Asia/Bangkok"
+        }
+        
+        print("📡 Đang kết nối trực tiếp với trạm khí tượng vệ tinh Open-Meteo...")
+        response = requests.get(url_open_meteo, params=params, timeout=5)
+        
+        if response.status_code == 200:
+            current_weather = response.json()["current"]
+            
+            # Đóng gói Schema chuẩn để đẩy vào MongoDB
+            live_packet = {
+                "station_name": "Trạm khí tượng vĩ mô Mê Linh Live",
+                "temperature": float(current_weather["temperature_2m"]),
+                "humidity": float(current_weather["relative_humidity_2m"]),
+                "rain": float(current_weather["rain"]),
+                "weather_code": int(current_weather["weather_code"])
+            }
+            
+            # Lưu vào MongoDB để làm giàu dữ liệu dự án
+            storage.save_weather_data(live_packet)
+            print(f"🟩 [Live Fetch] Đã nạp thời tiết thật vào MongoDB: {live_packet['temperature']}°C | Độ ẩm {live_packet['humidity']}%")
+        else:
+            print(f"❌ [Live Fetch] Trạm khí tượng từ chối, mã lỗi: {response.status_code}")
+            
+    except Exception as e:
+        print(f"⚠️ Cảnh báo lỗi cào thời tiết thời gian thực: {e} (Hệ thống sẽ dùng dữ liệu cũ gần nhất làm dự phòng)")
+
+
+    # ──> BƯỚC 1: BỐC DỮ LIỆU MỚI NHẤT RA (Lúc này chắc chắn là dữ liệu thật vừa cào) <──
     weather_data = storage.get_latest_weather_data()
     if not weather_data:
         raise HTTPException(status_code=404, detail="Hệ thống trống dữ liệu thời tiết!")
@@ -107,13 +147,13 @@ def trigger_concierge_broadcast():
     humidity = weather_data.get("humidity", 70.0)
     rain = weather_data.get("rain", 0.0)
 
-    # 2. Ép Gemini tạo nội dung tư vấn thuần mộc mạc
+    # ──> BƯỚC 2: ÉP GEMINI TẠO NỘI DUNG TƯ VẤN THUẦN MỘC MẠC <──
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
         prompt = f"""
         Bạn là chuyên gia cố vấn nông nghiệp số cho vùng trồng hoa hồng, hoa cúc, đào Tết tại Mê Linh, Hà Nội.
-        Hãy phân tích chỉ số hiện tại: Nhiệt độ {temp}°C, Độ ẩm {humidity}%, Lượng mưa {rain}mm.
-        Viết 1 bản tin ngắn gọn (3-4 câu), dùng ngôn từ bình dị, mộc mạc của nhà nông hướng dẫn bà con cần làm gì ngay hôm nay để bảo vệ vườn hoa (ví dụ: tưới nước, che lưới, khơi rãnh hay phun thuốc phòng bệnh).
+        Hãy phân tích chỉ số thời tiết thực tế hiện tại: Nhiệt độ {temp}°C, Độ ẩm {humidity}%, Lượng mưa {rain}mm.
+        Viết 1 bản tin ngắn gọn (3-4 câu), dùng ngôn từ bình dị, mộc mạc của nhà nông hướng dẫn bà con cần làm gì ngay hôm nay để bảo vệ vườn hoa (ví dụ: chống nóng, tưới phun sương giữ ẩm, che lưới lan, khơi rãnh hay phun thuốc phòng bệnh).
         ⚠️ Quy định nghiêm ngặt: Tuyệt đối không dùng bất kỳ ký tự bôi đậm **, dấu gạch đầu dòng, hay ký hiệu dạng Markdown. Chỉ trả về một đoạn văn thuần duy nhất để khi copy sang Zalo không bị lỗi phông chữ.
         """
         try:
@@ -128,16 +168,17 @@ def trigger_concierge_broadcast():
     if not recommendation_text:
         recommendation_text = f"🌤️ Bản tin Smart Farm Mê Linh: Hiện tại nhiệt độ khoảng {temp}°C, độ ẩm {humidity}%. Thời tiết ổn định, bà con tranh thủ chăm sóc vườn hoa và theo dõi sát sao tình hình sâu bệnh định kỳ."
 
-    # 3. Đóng gói lời nhắn hoàn chỉnh
+    # ──> BƯỚC 3: ĐÔNG GÓI LỜI NHẮN HOÀN CHỈNH <──
     final_message = f"📢 BẢN TIN SÁNG SMART FARM MÊ LINH\n\n{recommendation_text}"
 
-    # 4. Tiến hành nã đạn qua Telegram
+    # ──> BƯỚC 4: TIẾN HÀNH NÃ ĐẠN QUA TELEGRAM <──
     is_sent = send_telegram_message(text=final_message)
     
     if is_sent:
         return {
             "status": "success", 
-            "message": "Bản tin AI đã được gửi về Telegram của sếp! Hãy copy và paste sang nhóm Zalo của bà con.",
+            "message": "Bản tin AI dựa trên THỜI TIẾT THẬT đã được gửi về Telegram!",
+            "weather_captured": {"temperature": temp, "humidity": humidity, "rain": rain},
             "preview": final_message
         }
     else:
