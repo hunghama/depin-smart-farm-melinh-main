@@ -19,7 +19,8 @@ from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
 # 📦 Nạp Sổ tay kỹ thuật chống ảo giác sếp vừa tạo
-from backend.knowledge import AGRI_KNOWLEDGE_BASE
+from .knowledge import AGRI_KNOWLEDGE_BASE
+
 
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Telegram Concierge MVP")
 
