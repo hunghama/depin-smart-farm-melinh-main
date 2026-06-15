@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
+# 📦 Nạp Sổ tay kỹ thuật chống ảo giác sếp vừa tạo
+from backend.knowledge import AGRI_KNOWLEDGE_BASE
 
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Telegram Concierge MVP")
 
@@ -91,69 +93,78 @@ def send_telegram_message(text: str) -> bool:
 
 
 # =====================================================================
-# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (CẢI TIẾN)
+# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (PHIÊN BẢN CHUYÊN SÂU V2)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
-def trigger_concierge_broadcast():
+def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW TỰ ĐỘNG HOÀN TOÀN: 
-    1. Tự động gọi WeatherAPI (dùng API Key) lấy thời tiết THẬT của Mê Linh lúc bấm.
-    2. Găm dữ liệu thật vào MongoDB Atlas để lưu trữ lịch sử bằng hàm save_weather_data mới.
-    3. Triệu hồi Gemini phân tích dữ liệu thật và viết bản tin mộc mạc.
-    4. Bắn thẳng bản tin về Telegram để chuẩn bị Copy-Paste sang Zalo.
+    🔥 CONCIERGE FLOW V2 TỰ ĐỘNG & GROUNDING CHỐNG ẢO GIÁC: 
+    1. Bốc dữ liệu DỰ BÁO 3 NGÀY TỚI từ WeatherAPI (Dùng API Key chính chủ).
+    2. Đối chiếu Sổ tay kỹ thuật (knowledge.py) cho Rau Muống, Mướp Bí, Ngô Ngọt.
+    3. Trích xuất luật cứng nạp vào Prompt để xích cổ tư duy sáng tác của Gemini.
+    4. Bắn thẳng bản tin thực tế về Telegram.
     """
+    forecast_summary = ""
     
-    # ──> BƯỚC 0: CHỦ ĐỘNG CÀO THỜI TIẾT THỜI GIAN THỰC QUA WEATHERAPI (VÁ LỖI 429) <──
+    # ──> BƯỚC 0: CÀO XU HƯỚNG DỰ BÁO THỜI TIẾT 3 NGÀY ──
     try:
         api_key = os.getenv("WEATHER_API_KEY")
         if api_key:
-            # Gọi API theo Tọa độ chuẩn huyện Mê Linh, Hà Nội (21.18, 105.71)
-            url_weather = f"http://api.weatherapi.com/v1/current.json?key={api_key}&q=21.18,105.71&aqi=no"
+            url_forecast = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q=21.18,105.71&days=3&aqi=no"
             
-            print("📡 Đang dùng API Key kết nối trạm khí tượng biệt lập WeatherAPI...")
-            response = requests.get(url_weather, timeout=5)
+            print(f"📡 Đang bốc dữ liệu dự báo dài hạn cho Mê Linh (Mục tiêu: {crop})...")
+            response = requests.get(url_forecast, timeout=5)
             
             if response.status_code == 200:
-                res_data = response.json()["current"]
+                forecast_days = response.json()["forecast"]["forecastday"]
                 
-                # Ép dữ liệu từ WeatherAPI về đúng cấu trúc chuẩn của dự án mình
-                live_packet = {
-                    "station_name": "Trạm khí tượng vĩ mô Mê Linh Live",
-                    "temperature": float(res_data["temp_c"]),       # Nhiệt độ thật
-                    "humidity": float(res_data["humidity"]),         # Độ ẩm thật
-                    "rain": float(res_data.get("precip_mm", 0.0)),   # Lượng mưa thật (mm)
-                    "weather_code": int(res_data["condition"]["code"])
-                }
+                # Gom dữ liệu dự báo thành chuỗi văn bản trực quan
+                lines = []
+                for day in forecast_days:
+                    date_str = day["date"]
+                    max_temp = day["day"]["maxtemp_c"]
+                    min_temp = day["day"]["mintemp_c"]
+                    condition = day["day"]["condition"]["text"]
+                    lines.append(f"- Ngày {date_str}: Nhiệt độ từ {min_temp}°C đến {max_temp}°C. Trạng thái: {condition}")
                 
-                # Gọi tầng lưu trữ đám mây đã được bổ sung đêm qua
-                storage.save_weather_data(live_packet)
-                print(f"🟩 [Live Fetch] Đã nạp thời tiết thật độc lập: {live_packet['temperature']}°C | Độ ẩm {live_packet['humidity']}%")
+                forecast_summary = "\n".join(lines)
             else:
-                print(f"❌ [Live Fetch] WeatherAPI từ chối, mã lỗi: {response.status_code}")
-        else:
-            print("⚠️ Thiếu cấu hình biến môi trường WEATHER_API_KEY!")
-            
+                print(f"❌ WeatherAPI từ chối, mã lỗi: {response.status_code}")
     except Exception as e:
-        print(f"⚠️ Cảnh báo lỗi cào thời tiết thời gian thực: {e} (Hệ thống sẽ dùng dữ liệu cũ gần nhất làm dự phòng)")
+        print(f"⚠️ Cảnh báo lỗi cào dữ liệu dự báo: {e}")
 
+    # Bản tin dự phòng nếu nghẽn mạng API
+    if not forecast_summary:
+        forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
 
-    # ──> BƯỚC 1: BỐC DỮ LIỆU MỚI NHẤT RA (Lúc này chắc chắn là dữ liệu thật vừa cào) <──
-    weather_data = storage.get_latest_weather_data()
-    if not weather_data:
-        raise HTTPException(status_code=404, detail="Hệ thống trống dữ liệu thời tiết!")
+    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG TỪ KNOWLEDGE BASE ĐÃ GROUNDING ──
+    # Tìm kiếm dữ liệu cây trồng trong file knowledge.py sếp vừa tạo
+    knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
+    
+    if knowledge:
+        crop_title = crop.upper().replace("_", " ")
+        strict_rules_text = "\n".join([f"- {rule}" for rule in knowledge["rules"]])
+    else:
+        crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
+        strict_rules_text = "- Giữ ẩm cho đất trồng, bón phân cân đối, căng lưới lan chống nắng hè và chủ động quản lý nguồn nước tưới."
 
-    temp = weather_data.get("temperature", 25.0)
-    humidity = weather_data.get("humidity", 70.0)
-    rain = weather_data.get("rain", 0.0)
-
-    # ──> BƯỚC 2: ÉP GEMINI TẠO NỘI DUNG TƯ VẤN THUẦN MỘC MẠC <──
+    # ──> BƯỚC 2: TRIỆU HỒI GEMINI VÀ ÁP ĐẶT VÒNG KIM CÔ ──
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
         prompt = f"""
-        Bạn là chuyên gia cố vấn nông nghiệp số cho vùng trồng hoa hồng, hoa cúc, đào Tết tại Mê Linh, Hà Nội.
-        Hãy phân tích chỉ số thời tiết thực tế hiện tại: Nhiệt độ {temp}°C, Độ ẩm {humidity}%, Lượng mưa {rain}mm.
-        Viết 1 bản tin ngắn gọn (3-4 câu), dùng ngôn từ bình dị, mộc mạc của nhà nông hướng dẫn bà con cần làm gì ngay hôm nay để bảo vệ vườn hoa (ví dụ: chống nóng, tưới phun sương giữ ẩm, che lưới lan, khơi rãnh hay phun thuốc phòng bệnh).
-        ⚠️ Quy định nghiêm ngặt: Tuyệt đối không dùng bất kỳ ký tự bôi đậm **, dấu gạch đầu dòng, hay ký hiệu dạng Markdown. Chỉ trả về một đoạn văn thuần duy nhất để khi copy sang Zalo không bị lỗi phông chữ.
+        Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội. 
+        Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật thành lời dặn dò bình dị cho bà con trong họ.
+
+        📊 1. DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG 3 NGÀY TỚI:
+        {forecast_summary}
+
+        📋 2. SỔ TAY KỸ THUẬT BẮT BUỘC (TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ Ý CHẾ THÊM BIỆN PHÁP KHÁC NẰM NGOÀI DANH SÁCH):
+        {strict_rules_text}
+
+        🚨 ĐIỀU KHOẢN CHỐNG ẢO GIÁC (THI HÀNH NGHIÊM NGẶT):
+        - Chỉ đưa ra khuyến nghị hành động dựa trên 100% thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với tình hình thời tiết dự báo.
+        - Tuyệt đối không bịa tên thuốc trừ sâu, thuốc bảo vệ thực vật hóa học hay cơ chế sinh học lạ. Nếu thời tiết không kích hoạt điều kiện đặc biệt nào, hãy khuyên bà con chăm sóc ruộng vườn như bình thường.
+        - Văn phong mộc mạc của nhà nông, viết liền mạch thành một đoạn văn ngắn gọn (4 câu), không dùng ký tự Markdown bôi đậm ** hay dấu gạch đầu dòng.
         """
         try:
             response = ai_client.models.generate_content(
@@ -165,23 +176,16 @@ def trigger_concierge_broadcast():
             print(f"⚠️ Sự cố gọi Gemini API: {e}")
 
     if not recommendation_text:
-        recommendation_text = f"🌤️ Bản tin Smart Farm Mê Linh: Hiện tại nhiệt độ khoảng {temp}°C, độ ẩm {humidity}%. Thời tiết ổn định, bà con tranh thủ chăm sóc vườn hoa và theo dõi sát sao tình hình sâu bệnh định kỳ."
+        recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
 
-    # ──> BƯỚC 3: ĐÔNG GÓI LỜI NHẮN HOÀN CHỈNH <──
-    final_message = f"📢 BẢN TIN SÁNG SMART FARM MÊ LINH\n\n{recommendation_text}"
-
-    # ──> BƯỚC 4: TIẾN HÀNH NÃ ĐẠN QUA TELEGRAM <──
+    # ──> BƯỚC 3: ĐÔNG GÓI VÀ BẮN TIN VỀ TELEGRAM VỚI BẢN TIN CHUYÊN SÂU ──
+    final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG V2 - {crop_title}]\n\n{recommendation_text}"
     is_sent = send_telegram_message(text=final_message)
     
     if is_sent:
-        return {
-            "status": "success", 
-            "message": "Bản tin AI dựa trên THỜI TIẾT THẬT đã được gửi về Telegram!",
-            "weather_captured": {"temperature": temp, "humidity": humidity, "rain": rain},
-            "preview": final_message
-        }
+        return {"status": "success", "preview": final_message}
     else:
-        raise HTTPException(status_code=500, detail="Cổng gọi API Telegram gặp sự cố kỹ thuật")
+        raise HTTPException(status_code=500, detail="Lỗi kết nối cổng Telegram")
 
 
 if __name__ == "__main__":
