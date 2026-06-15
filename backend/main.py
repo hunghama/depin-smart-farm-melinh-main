@@ -14,6 +14,7 @@ load_dotenv()
 
 from fastapi import FastAPI, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse  # 🔥 Đã thêm để làm giao diện nút bấm remote
 from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
@@ -186,6 +187,49 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         return {"status": "success", "preview": final_message}
     else:
         raise HTTPException(status_code=500, detail="Lỗi kết nối cổng Telegram")
+
+
+# =====================================================================
+# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA CHỐNG QUÊN LINK (DÀNH CHO ĐIỆN THOẠI CỦA HÙNG)
+# =====================================================================
+@app.get("/", response_class=HTMLResponse)
+def remote_dashboard():
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Smart Farm Mê Linh - Remote Panel</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    </head>
+    <body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col justify-center items-center p-4">
+        <div class="bg-slate-800 p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-700 text-center">
+            <h1 class="text-xl font-bold text-emerald-400 mb-2">🚜 SMART FARM MÊ LINH v2</h1>
+            <p class="text-xs text-slate-400 mb-6">Bảng điều khiển phát tin khuyến nông số</p>
+            
+            <div class="space-y-4">
+                <a href="/api/v1/zalo/broadcast" target="_blank" class="block w-full py-3 bg-emerald-600 hover:bg-emerald-500 font-medium rounded-xl transition shadow-md no-underline">
+                    📢 Phát Bản Tin Chung (6h Sáng)
+                </a>
+                <hr class="border-slate-700 my-2">
+                <a href="/api/v1/zalo/broadcast?crop=rau_muong" target="_blank" class="block w-full py-3 bg-teal-600 hover:bg-teal-500 font-medium rounded-xl transition shadow-md no-underline">
+                    🥬 Kích Hoạt Đội Rau Muống Hè
+                </a>
+                <a href="/api/v1/zalo/broadcast?crop=muop_bi" target="_blank" class="block w-full py-3 bg-cyan-600 hover:bg-cyan-500 font-medium rounded-xl transition shadow-md no-underline">
+                    🥒 Kích Hoạt Hội Mướp - Bí Xanh
+                </a>
+                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot" target="_blank" class="block w-full py-3 bg-amber-600 hover:bg-amber-500 font-medium rounded-xl transition shadow-md no-underline">
+                    🌽 Kích Hoạt Vùng Ngô Ngọt
+                </a>
+            </div>
+            
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.0 • Chống ảo giác AI</p>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
 
 
 if __name__ == "__main__":
