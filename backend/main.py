@@ -1,7 +1,7 @@
 import os
 import sys
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone  # 🔥 Đã thêm timedelta và timezone để tính giờ VN
 from dotenv import load_dotenv
 
 # 🔥 Đóng đinh đường dẫn tuyệt đối từ gốc lên quyền ưu tiên CAO NHẤT
@@ -14,13 +14,12 @@ load_dotenv()
 
 from fastapi import FastAPI, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse  # 🔥 Đã thêm để làm giao diện nút bấm remote
+from fastapi.responses import HTMLResponse  
 from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
 # 📦 Nạp Sổ tay kỹ thuật chống ảo giác sếp vừa tạo
-from .knowledge import AGRI_KNOWLEDGE_BASE
-
+from backend.knowledge import AGRI_KNOWLEDGE_BASE
 
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Telegram Concierge MVP")
 
@@ -100,11 +99,12 @@ def send_telegram_message(text: str) -> bool:
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW V2 TỰ ĐỘNG & GROUNDING CHỐNG ẢO GIÁC: 
+    🔥 CONCIERGE FLOW V2.1 TỰ ĐỘNG, GROUNDING CHỐNG ẢO GIÁC & ĐỒNG BỘ THỜI GIAN: 
     1. Bốc dữ liệu DỰ BÁO 3 NGÀY TỚI từ WeatherAPI (Dùng API Key chính chủ).
-    2. Đối chiếu Sổ tay kỹ thuật (knowledge.py) cho Rau Muống, Mướp Bí, Ngô Ngọt.
-    3. Trích xuất luật cứng nạp vào Prompt để xích cổ tư duy sáng tác của Gemini.
-    4. Bắn thẳng bản tin thực tế về Telegram.
+    2. Tính toán chính xác ngày giờ thực tế tại Việt Nam để làm mốc neo (Time Grounding).
+    3. Đối chiếu Sổ tay kỹ thuật (knowledge.py) cho Rau Muống, Mướp Bí, Ngô Ngọt.
+    4. Trích xuất luật cứng nạp vào Prompt để xích cổ tư duy sáng tác của Gemini.
+    5. Bắn thẳng bản tin thực tế về Telegram.
     """
     forecast_summary = ""
     
@@ -140,7 +140,6 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
 
     # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG TỪ KNOWLEDGE BASE ĐÃ GROUNDING ──
-    # Tìm kiếm dữ liệu cây trồng trong file knowledge.py sếp vừa tạo
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
     
     if knowledge:
@@ -150,22 +149,32 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
         strict_rules_text = "- Giữ ẩm cho đất trồng, bón phân cân đối, căng lưới lan chống nắng hè và chủ động quản lý nguồn nước tưới."
 
-    # ──> BƯỚC 2: TRIỆU HỒI GEMINI VÀ ÁP ĐẶT VÒNG KIM CÔ ──
+    # ──> BƯỚC 1.5: TÍNH GIỜ CHUẨN VIỆT NAM (UTC+7) ĐỂ CHỐNG NGÁO THỜI GIAN ──
+    # Render chạy giờ UTC nên ta ép cộng thêm 7 tiếng để ra giờ Việt Nam chính xác
+    vn_now = datetime.now(timezone.utc) + timedelta(hours=7)
+    current_date_vn = vn_now.strftime("%d/%m/%Y")
+    current_time_vn = vn_now.strftime("%H:%M")
+
+    # ──> BƯỚC 2: TRIỆU HỒI GEMINI VÀ ÁP ĐẶT VÒNG KIM CÔ THỜI GIAN ──
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
         prompt = f"""
         Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội. 
         Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật thành lời dặn dò bình dị cho bà con trong họ.
 
-        📊 1. DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG 3 NGÀY TỚI:
+        ⏰ MỐC THỜI GIAN THỰC TẾ ĐỒNG HỒ TẠI VIỆT NAM (BẮT BUỘC ĐỐI CHIẾU):
+        - Bây giờ chính xác đang là: {current_time_vn} ngày {current_date_vn}.
+        - Hãy dùng mốc này để định vị đâu là hôm nay, đâu là ngày mai. Nếu mốc này đã là khung giờ đêm muộn, hãy hiểu ngày tiếp theo trong danh sách lịch dưới đây mới là ngày mai!
+
+        📊 1. DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG 3 NGÀY TỚI TỪ API:
         {forecast_summary}
 
         📋 2. SỔ TAY KỸ THUẬT BẮT BUỘC (TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ Ý CHẾ THÊM BIỆN PHÁP KHÁC NẰM NGOÀI DANH SÁCH):
         {strict_rules_text}
 
-        🚨 ĐIỀU KHOẢN CHỐNG ẢO GIÁC (THI HÀNH NGHIÊM NGẶT):
+        🚨 ĐIỀU KHOẢN CHỐNG ẢO GIÁC & SAI LỆCH THỜI GIAN (THI HÀNH NGHIÊM NGẶT):
+        - Đối chiếu kỹ mốc thời gian thực tế ở trên để gọi tên 'hôm nay', 'ngày mai' cho đúng thực tế, tuyệt đối không gọi nhầm ngày đang diễn ra hoặc đã qua là ngày mai.
         - Chỉ đưa ra khuyến nghị hành động dựa trên 100% thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với tình hình thời tiết dự báo.
-        - Tuyệt đối không bịa tên thuốc trừ sâu, thuốc bảo vệ thực vật hóa học hay cơ chế sinh học lạ. Nếu thời tiết không kích hoạt điều kiện đặc biệt nào, hãy khuyên bà con chăm sóc ruộng vườn như bình thường.
         - Văn phong mộc mạc của nhà nông, viết liền mạch thành một đoạn văn ngắn gọn (4 câu), không dùng ký tự Markdown bôi đậm ** hay dấu gạch đầu dòng.
         """
         try:
@@ -180,7 +189,7 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     if not recommendation_text:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
 
-    # ──> BƯỚC 3: ĐÔNG GÓI VÀ BẮN TIN VỀ TELEGRAM VỚI BẢN TIN CHUYÊN SÂU ──
+    # ──> BƯỚC 3: ĐỒNG GÓI VÀ BẮN TIN VỀ TELEGRAM VỚI BẢN TIN CHUYÊN SÂU ──
     final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG V2 - {crop_title}]\n\n{recommendation_text}"
     is_sent = send_telegram_message(text=final_message)
     
@@ -225,7 +234,7 @@ def remote_dashboard():
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.0 • Chống ảo giác AI</p>
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.1 • Đã đồng bộ múi giờ VN</p>
         </div>
     </body>
     </html>
