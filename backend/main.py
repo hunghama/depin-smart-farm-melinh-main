@@ -97,42 +97,41 @@ def send_telegram_message(text: str) -> bool:
 def trigger_concierge_broadcast():
     """
     🔥 CONCIERGE FLOW TỰ ĐỘNG HOÀN TOÀN: 
-    1. Tự động gọi API Open-Meteo lấy thời tiết THẬT của Mê Linh lúc bấm.
-    2. Găm dữ liệu thật vào MongoDB Atlas để lưu trữ lịch sử.
+    1. Tự động gọi WeatherAPI (dùng API Key) lấy thời tiết THẬT của Mê Linh lúc bấm.
+    2. Găm dữ liệu thật vào MongoDB Atlas để lưu trữ lịch sử bằng hàm save_weather_data mới.
     3. Triệu hồi Gemini phân tích dữ liệu thật và viết bản tin mộc mạc.
     4. Bắn thẳng bản tin về Telegram để chuẩn bị Copy-Paste sang Zalo.
     """
     
-    # ──> BƯỚC 0: CHỦ ĐỘNG CÀO THỜI TIẾT THỜI GIAN THỰC MÊ LINH <──
+    # ──> BƯỚC 0: CHỦ ĐỘNG CÀO THỜI TIẾT THỜI GIAN THỰC QUA WEATHERAPI (VÁ LỖI 429) <──
     try:
-        url_open_meteo = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": 21.18,   # Tọa độ chuẩn huyện Mê Linh, Hà Nội
-            "longitude": 105.71,
-            "current": ["temperature_2m", "relative_humidity_2m", "rain", "weather_code"],
-            "timezone": "Asia/Bangkok"
-        }
-        
-        print("📡 Đang kết nối trực tiếp với trạm khí tượng vệ tinh Open-Meteo...")
-        response = requests.get(url_open_meteo, params=params, timeout=5)
-        
-        if response.status_code == 200:
-            current_weather = response.json()["current"]
+        api_key = os.getenv("WEATHER_API_KEY")
+        if api_key:
+            # Gọi API theo Tọa độ chuẩn huyện Mê Linh, Hà Nội (21.18, 105.71)
+            url_weather = f"http://api.weatherapi.com/v1/current.json?key={api_key}&q=21.18,105.71&aqi=no"
             
-            # Đóng gói Schema chuẩn để đẩy vào MongoDB
-            live_packet = {
-                "station_name": "Trạm khí tượng vĩ mô Mê Linh Live",
-                "temperature": float(current_weather["temperature_2m"]),
-                "humidity": float(current_weather["relative_humidity_2m"]),
-                "rain": float(current_weather["rain"]),
-                "weather_code": int(current_weather["weather_code"])
-            }
+            print("📡 Đang dùng API Key kết nối trạm khí tượng biệt lập WeatherAPI...")
+            response = requests.get(url_weather, timeout=5)
             
-            # Lưu vào MongoDB để làm giàu dữ liệu dự án
-            storage.save_weather_data(live_packet)
-            print(f"🟩 [Live Fetch] Đã nạp thời tiết thật vào MongoDB: {live_packet['temperature']}°C | Độ ẩm {live_packet['humidity']}%")
+            if response.status_code == 200:
+                res_data = response.json()["current"]
+                
+                # Ép dữ liệu từ WeatherAPI về đúng cấu trúc chuẩn của dự án mình
+                live_packet = {
+                    "station_name": "Trạm khí tượng vĩ mô Mê Linh Live",
+                    "temperature": float(res_data["temp_c"]),       # Nhiệt độ thật
+                    "humidity": float(res_data["humidity"]),         # Độ ẩm thật
+                    "rain": float(res_data.get("precip_mm", 0.0)),   # Lượng mưa thật (mm)
+                    "weather_code": int(res_data["condition"]["code"])
+                }
+                
+                # Gọi tầng lưu trữ đám mây đã được bổ sung đêm qua
+                storage.save_weather_data(live_packet)
+                print(f"🟩 [Live Fetch] Đã nạp thời tiết thật độc lập: {live_packet['temperature']}°C | Độ ẩm {live_packet['humidity']}%")
+            else:
+                print(f"❌ [Live Fetch] WeatherAPI từ chối, mã lỗi: {response.status_code}")
         else:
-            print(f"❌ [Live Fetch] Trạm khí tượng từ chối, mã lỗi: {response.status_code}")
+            print("⚠️ Thiếu cấu hình biến môi trường WEATHER_API_KEY!")
             
     except Exception as e:
         print(f"⚠️ Cảnh báo lỗi cào thời tiết thời gian thực: {e} (Hệ thống sẽ dùng dữ liệu cũ gần nhất làm dự phòng)")
