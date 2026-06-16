@@ -95,15 +95,15 @@ def send_telegram_message(text: str) -> bool:
 
 
 # =====================================================================
-# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (PHIÊN BẢN GỐC ỔN ĐỊNH)
+# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (PHIÊN BẢN V2.6 CHUẨN ĐÉT)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW V2 RECOVERY: KHÔI PHỤC BẢN PROMPT PHẲNG GỐC SIÊU ỔN ĐỊNH
-    - Quay lại cơ chế truyền prompt trực tiếp giúp AI viết văn tuôn trào, không bị cụt câu.
-    - Giữ lại bộ luật Grounding chống ảo giác và tính giờ Việt Nam chuẩn xác.
-    - Giữ lại cơ chế tự động thử lại nếu dính lỗi nghẽn mạng Google.
+    🔥 CONCIERGE FLOW V2.6 ULTIMATE: ÉP BUỘC TRÍCH XUẤT NHIỆT ĐỘ & SỐ LIỆU CHI TIẾT
+    - Sử dụng Prompt phẳng giúp AI viết thông suốt không bị cắt cụt câu giữa chừng.
+    - Cài thêm điều khoản bắt buộc phải lồng ghép số liệu nhiệt độ và diễn biến thời tiết từng ngày.
+    - Bảo toàn cơ chế Grounding chống ảo giác và Auto-Retry kháng lỗi 503.
     """
     forecast_summary = ""
     
@@ -151,13 +151,13 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     current_date_vn = vn_now.strftime("%d/%m/%Y")
     current_time_vn = vn_now.strftime("%H:%M")
 
-    # ──> BƯỚC 2: GỘP TẤT CẢ VÀO MỘT KHUNG PROMPT PHẲNG TRUYỀN THỐNG (BAO CHẠY THÔNG SUỐT) ──
+    # ──> BƯỚC 2: KHUNG PROMPT PHẲNG NÂNG CẤP ĐIỀU KHOẢN SỐ LIỆU BẮT BUỘC ──
     prompt = f"""
     Bạn là một trợ lý khuyến nông số am hiểu thực địa tại huyện Mê Linh, Hà Nội.
-    Hãy phân tích dữ liệu thời tiết 3 ngày tới và đối chiếu Sổ tay kỹ thuật dưới đây để viết một bản tin dặn dò hoàn chỉnh, liền mạch (khoảng 4-5 câu) gửi cho bà con trong họ.
+    Hãy phân tích dữ liệu thời tiết 3 ngày tới và đối chiếu Sổ tay kỹ thuật dưới đây để viết một bản tin dặn dò hoàn chỉnh, liền mạch gửi cho bà con trong họ.
 
     ⏰ MỐC THỜI GIAN ĐỒNG HỒ THỰC TẾ:
-    - Bây giờ đang là: {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để gọi tên 'hôm nay', 'ngày mai' cho đúng lịch thực tế tại Việt Nam, tránh nói nhầm lịch.
+    - Bây giờ đang là: {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để gọi tên 'hôm nay', 'ngày mai' cho đúng lịch thực tế tại Việt Nam.
 
     📊 DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG TỪ API:
     {forecast_summary}
@@ -165,33 +165,31 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     📋 SỔ TAY KỸ THUẬT BẮT BUỘC ĐỂ KHUYÊN BÀ CON:
     {strict_rules_text}
 
-    🚨 YÊU CẦU ĐỊNH DẠNG BẢN TIN:
-    1. Phải viết thành một đoạn văn xuôi hoàn chỉnh từ đầu đến cuối, tuyệt đối không được dừng câu giữa chừng hoặc bỏ lửng văn bản.
-    2. Lời dặn dò mộc mạc, bình dị, chân chất.
-    3. Không dùng dấu gạch đầu dòng, không dùng ký tự bôi đậm ** trong bài viết.
+    🚨 YÊU CẦU ĐỊNH DẠNG BẢN TIN (BẮT BUỘC TUÂN THỦ TUYỆT ĐỐI):
+    1. BẮT BUỘC phải lồng ghép khéo léo thông tin số liệu về nhiệt độ (ví dụ: nhiệt độ bao nhiêu độ, trời mát mẻ hay nắng gắt) và tình trạng thời tiết (mưa dông hay nắng ráo) cụ thể của từng ngày vào nội dung dặn dò để bản tin có số liệu trực quan cho bà con nắm bắt.
+    2. Phải viết thành một đoạn văn xuôi hoàn chỉnh, mượt mà từ đầu đến cuối (khoảng 5-6 câu), tuyệt đối không được dừng câu giữa chừng hoặc bỏ lửng văn bản.
+    3. Lời dặn dò mộc mạc, bình dị, chân chất như người trong gia đình nói với nhau.
+    4. Không dùng dấu gạch đầu dòng, không dùng ký tự bôi đậm ** trong bài viết.
     """
 
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
-        # Chạy vòng lặp 3 lần phòng thủ nghẽn mạng nhưng dùng hàm gọi thuần túy, giải phóng tư duy cho AI
         for attempt in range(3):
             try:
-                print(f"🤖 Đang gọi Gemini API truyền thống (Lần {attempt + 1}/3)...")
+                print(f"🤖 Đang gọi Gemini API V2.6 (Lần {attempt + 1}/3)...")
                 response = ai_client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=prompt,
                 )
                 recommendation_text = response.text.strip()
-                # Kiểm tra nếu bài viết có độ dài an toàn (không bị cụt mẩu vài từ)
-                if recommendation_text and len(recommendation_text) > 40:
-                    print("🟩 Khôi phục cuộc gọi Gemini thành công rực rỡ!")
+                if recommendation_text and len(recommendation_text) > 60:
+                    print("🟩 Cuộc gọi Gemini V2.6 thành công rực rỡ!")
                     break
             except Exception as e:
                 print(f"⚠️ Sự cố kết nối tại lần thử {attempt + 1}: {e}")
                 time.sleep(2)
 
-    # Fallback an toàn nếu có sự cố
-    if not recommendation_text or len(recommendation_text) < 40:
+    if not recommendation_text or len(recommendation_text) < 60:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
 
     # ──> BƯỚC 3: ĐỒNG GÓI VÀ ĐẨY BẢN TIN VỀ TELEGRAM ──
@@ -239,7 +237,7 @@ def remote_dashboard():
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.0 • Bản khôi phục siêu ổn định</p>
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.6 • Đầy đủ số liệu & nhiệt độ</p>
         </div>
     </body>
     </html>
