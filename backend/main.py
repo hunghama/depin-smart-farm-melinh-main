@@ -1,7 +1,6 @@
 import os
 import sys
 import time  
-import random  
 import requests
 from datetime import datetime, timedelta, timezone  
 from dotenv import load_dotenv
@@ -18,8 +17,7 @@ from fastapi import FastAPI, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse  
 from pydantic import BaseModel, Field
-from google import genai  
-from google.genai import types  
+from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
 # 📦 Nạp Sổ tay kỹ thuật chống ảo giác
 from backend.knowledge import AGRI_KNOWLEDGE_BASE
@@ -97,16 +95,15 @@ def send_telegram_message(text: str) -> bool:
 
 
 # =====================================================================
-# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (PHIÊN BẢN CHUYÊN SÂU V2)
+# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN TƯ VẤN HÀNG NGÀY (PHIÊN BẢN GỐC ỔN ĐỊNH)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW V2.5 KIẾN TRÚC TOÀN DIỆN - PHÁ VỠ CẠM BẪY CHỮ:
-    - Bốc dữ liệu DỰ BÁO dài hạn 3 ngày từ WeatherAPI.
-    - Sửa đổi Chỉ thị gốc từ "Cấm đoán" sang "Hướng dẫn tích cực" bằng cách chỉ định rõ các từ nối thời gian.
-    - Tăng nhẹ Temperature lên 0.4 để giải phóng tư duy ngôn ngữ cho AI, giúp câu viết mượt mà không bị nghẹn câu.
-    - Bắn thẳng bản tin hoàn chỉnh về Telegram.
+    🔥 CONCIERGE FLOW V2 RECOVERY: KHÔI PHỤC BẢN PROMPT PHẲNG GỐC SIÊU ỔN ĐỊNH
+    - Quay lại cơ chế truyền prompt trực tiếp giúp AI viết văn tuôn trào, không bị cụt câu.
+    - Giữ lại bộ luật Grounding chống ảo giác và tính giờ Việt Nam chuẩn xác.
+    - Giữ lại cơ chế tự động thử lại nếu dính lỗi nghẽn mạng Google.
     """
     forecast_summary = ""
     
@@ -146,7 +143,7 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         strict_rules_text = """
         - Nếu thời tiết dự báo nắng nóng gắt: Nhắc bà con chú ý giữ ẩm cho đất trồng, bón phân cân đối và căng lưới lan che nắng.
         - Nếu thời tiết dự báo có mưa dông, mưa lớn: Nhắc bà con khẩn trương kiểm tra bờ ruộng, khơi thông luống rãnh để thoát nước nhanh, tránh ngập úng bộ rễ.
-        - Nếu thời tiết mát mẻ hoặc không kích hoạt thiên tai cực đoan: Dặn bà con tranh thủ làm cỏ, tỉa lá già và chủ động chăm sóc ruộng vườn phát triển tự nhiên như mọi khi.
+        - Nếu thời tiết mát mẻ hoặc không có thiên tai cực đoan: Dặn bà con tranh thủ ra đồng làm cỏ, tỉa lá già và chủ động chăm sóc ruộng vườn phát triển tự nhiên như mọi khi.
         """
 
     # ──> BƯỚC 1.5: TÍNH GIỜ CHUẨN VIỆT NAM (UTC+7) ──
@@ -154,61 +151,50 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     current_date_vn = vn_now.strftime("%d/%m/%Y")
     current_time_vn = vn_now.strftime("%H:%M")
 
-    # ──> BƯỚC 2: THIẾT LẬP INPUT NỘI DUNG VÀ HỆ THỐNG CHỈ THỊ GỐC ──
-    user_content = f"""
-    📊 DỰ BÁO THỜI TIẾT 3 NGÀY TỚI TỪ API:
-    {forecast_summary}
-
-    📋 SỔ TAY KỸ THUẬT BẮT BUỘC:
-    {strict_rules_text}
+    # ──> BƯỚC 2: GỘP TẤT CẢ VÀO MỘT KHUNG PROMPT PHẲNG TRUYỀN THỐNG (BAO CHẠY THÔNG SUỐT) ──
+    prompt = f"""
+    Bạn là một trợ lý khuyến nông số am hiểu thực địa tại huyện Mê Linh, Hà Nội.
+    Hãy phân tích dữ liệu thời tiết 3 ngày tới và đối chiếu Sổ tay kỹ thuật dưới đây để viết một bản tin dặn dò hoàn chỉnh, liền mạch (khoảng 4-5 câu) gửi cho bà con trong họ.
 
     ⏰ MỐC THỜI GIAN ĐỒNG HỒ THỰC TẾ:
-    - Bây giờ là {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để định vị hôm nay/ngày mai cho đúng lịch thực tế tại Việt Nam.
-    """
+    - Bây giờ đang là: {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để gọi tên 'hôm nay', 'ngày mai' cho đúng lịch thực tế tại Việt Nam, tránh nói nhầm lịch.
 
-    # 🔥 ĐÃ NÂNG CẤP CHỈ THỊ GỐC SANG HƯỚNG DẪN TÍCH CỰC, XÓA BỎ LỆNH CẤM DỮ DẰN 🔥
-    system_instruction_text = """
-    Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội.
-    Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật được cấp thành lời dặn dò bình dị, chân chất như người trong họ dặn dò nhau.
+    📊 DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG TỪ API:
+    {forecast_summary}
 
-    📋 QUY TẮC PHÁT NGÔN BẮT BUỘC (BAO GROUNDING):
-    1. Chỉ đưa ra khuyến nghị hành động dựa trên các thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với thời tiết dự báo. Tuyệt đối không tự chế tên thuốc bảo vệ thực vật hay hóa chất lạ nằm ngoài danh sách.
-    2. Đối chiếu mốc thời gian đồng hồ thực tế để gọi tên 'hôm nay', 'ngày mai' chuẩn xác, tránh ngáo giờ ban đêm.
-    3. CẤU TRÚC VĂN BẢN: Hãy viết thành một đoạn văn xuôi liên tục và mượt mà hoàn chỉnh (khoảng 4-5 câu). Hãy dùng các cụm từ nối thời gian như "Đối với hôm nay...", "Sang đến ngày mai...", "Còn như ngày kia..." để liên kết nội dung các ngày lại với nhau. Phân tách các ý bằng dấu chấm câu (.) và dấu phẩy (,) thông thường. Không viết biểu tượng gạch đầu dòng, không dùng ký tự bôi đậm.
+    📋 SỔ TAY KỸ THUẬT BẮT BUỘC ĐỂ KHUYÊN BÀ CON:
+    {strict_rules_text}
+
+    🚨 YÊU CẦU ĐỊNH DẠNG BẢN TIN:
+    1. Phải viết thành một đoạn văn xuôi hoàn chỉnh từ đầu đến cuối, tuyệt đối không được dừng câu giữa chừng hoặc bỏ lửng văn bản.
+    2. Lời dặn dò mộc mạc, bình dị, chân chất.
+    3. Không dùng dấu gạch đầu dòng, không dùng ký tự bôi đậm ** trong bài viết.
     """
 
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
-        config_setup = types.GenerateContentConfig(
-            system_instruction=system_instruction_text,  
-            temperature=0.4,  # 🔥 Tăng nhẹ lên 0.4 để tăng độ linh hoạt ngôn từ, giải phóng khóa não
-            max_output_tokens=500  
-        )
-        
-        max_retries = 3
-        for attempt in range(max_retries):
+        # Chạy vòng lặp 3 lần phòng thủ nghẽn mạng nhưng dùng hàm gọi thuần túy, giải phóng tư duy cho AI
+        for attempt in range(3):
             try:
-                print(f"🤖 Đang nã cuộc gọi tối ưu lên Gemini API (Lần {attempt + 1}/{max_retries})...")
+                print(f"🤖 Đang gọi Gemini API truyền thống (Lần {attempt + 1}/3)...")
                 response = ai_client.models.generate_content(
                     model='gemini-2.5-flash',
-                    contents=user_content,
-                    config=config_setup
+                    contents=prompt,
                 )
                 recommendation_text = response.text.strip()
-                if recommendation_text:
-                    print("🟩 Gọi Gemini API thành công rực rỡ với cấu hình V2.5!")
+                # Kiểm tra nếu bài viết có độ dài an toàn (không bị cụt mẩu vài từ)
+                if recommendation_text and len(recommendation_text) > 40:
+                    print("🟩 Khôi phục cuộc gọi Gemini thành công rực rỡ!")
                     break
             except Exception as e:
-                print(f"⚠️ Phát hiện sự cố Gemini API tại lần thử {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    sleep_time = (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⏳ Tự động kích hoạt Backoff, nín thở chờ {sleep_time:.2f} giây...")
-                    time.sleep(sleep_time)
+                print(f"⚠️ Sự cố kết nối tại lần thử {attempt + 1}: {e}")
+                time.sleep(2)
 
-    if not recommendation_text:
+    # Fallback an toàn nếu có sự cố
+    if not recommendation_text or len(recommendation_text) < 40:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
 
-    # ──> BƯỚC 3: ĐỒNG GÓI VÀ ĐẨY BẢN TIN CHUYÊN SÂU VỀ TELEGRAM ──
+    # ──> BƯỚC 3: ĐỒNG GÓI VÀ ĐẨY BẢN TIN VỀ TELEGRAM ──
     final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG V2 - {crop_title}]\n\n{recommendation_text}"
     is_sent = send_telegram_message(text=final_message)
     
@@ -219,7 +205,7 @@ def trigger_concierge_broadcast(crop: str = "chung"):
 
 
 # =====================================================================
-# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA CHỐNG QUÊN LINK (DÀNH CHO ĐIỆN THOẠI CỦA HÙNG)
+# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA CHỐNG QUÊN LINK (GIAO DIỆN ĐIỆN THOẠI)
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 def remote_dashboard():
@@ -253,7 +239,7 @@ def remote_dashboard():
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.5 • Phá vỡ bẫy logic AI</p>
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.0 • Bản khôi phục siêu ổn định</p>
         </div>
     </body>
     </html>
