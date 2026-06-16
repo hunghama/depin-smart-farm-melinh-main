@@ -1,7 +1,9 @@
 import os
 import sys
+import time  
+import random  # 🔥 Thêm để tính toán nhiễu Jitter khi retry
 import requests
-from datetime import datetime, timedelta, timezone  # 🔥 Đã thêm timedelta và timezone để tính giờ VN
+from datetime import datetime, timedelta, timezone  
 from dotenv import load_dotenv
 
 # 🔥 Đóng đinh đường dẫn tuyệt đối từ gốc lên quyền ưu tiên CAO NHẤT
@@ -17,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse  
 from pydantic import BaseModel, Field
 from google import genai  # SDK Gemini chính hãng mới nhất
+from google.genai import types  # 🔥 Import bộ định nghĩa kiểu dữ liệu cấu hình của Google
 from backend.storage import MongoStorage
 # 📦 Nạp Sổ tay kỹ thuật chống ảo giác sếp vừa tạo
 from backend.knowledge import AGRI_KNOWLEDGE_BASE
@@ -99,12 +102,11 @@ def send_telegram_message(text: str) -> bool:
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW V2.1 TỰ ĐỘNG, GROUNDING CHỐNG ẢO GIÁC & ĐỒNG BỘ THỜI GIAN: 
-    1. Bốc dữ liệu DỰ BÁO 3 NGÀY TỚI từ WeatherAPI (Dùng API Key chính chủ).
-    2. Tính toán chính xác ngày giờ thực tế tại Việt Nam để làm mốc neo (Time Grounding).
-    3. Đối chiếu Sổ tay kỹ thuật (knowledge.py) cho Rau Muống, Mướp Bí, Ngô Ngọt.
-    4. Trích xuất luật cứng nạp vào Prompt để xích cổ tư duy sáng tác của Gemini.
-    5. Bắn thẳng bản tin thực tế về Telegram.
+    🔥 CONCIERGE FLOW V2.3 KIẾN TRÚC TỐI ƯU CAO CẤP:
+    - Bốc dữ liệu DỰ BÁO LỰA CHỌN dài hạn 3 ngày từ WeatherAPI.
+    - Cấu hình Native System Instruction tách biệt giúp tăng tốc phản hồi.
+    - Áp dụng cơ chế Exponential Backoff + Jitter kháng hoàn toàn lỗi 503 quá tải.
+    - Ép tham số Temperature=0.2 chống AI ngáo ngơ viết nhảm.
     """
     forecast_summary = ""
     
@@ -113,14 +115,11 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         api_key = os.getenv("WEATHER_API_KEY")
         if api_key:
             url_forecast = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q=21.18,105.71&days=3&aqi=no"
-            
             print(f"📡 Đang bốc dữ liệu dự báo dài hạn cho Mê Linh (Mục tiêu: {crop})...")
             response = requests.get(url_forecast, timeout=5)
             
             if response.status_code == 200:
                 forecast_days = response.json()["forecast"]["forecastday"]
-                
-                # Gom dữ liệu dự báo thành chuỗi văn bản trực quan
                 lines = []
                 for day in forecast_days:
                     date_str = day["date"]
@@ -128,20 +127,17 @@ def trigger_concierge_broadcast(crop: str = "chung"):
                     min_temp = day["day"]["mintemp_c"]
                     condition = day["day"]["condition"]["text"]
                     lines.append(f"- Ngày {date_str}: Nhiệt độ từ {min_temp}°C đến {max_temp}°C. Trạng thái: {condition}")
-                
                 forecast_summary = "\n".join(lines)
             else:
                 print(f"❌ WeatherAPI từ chối, mã lỗi: {response.status_code}")
     except Exception as e:
         print(f"⚠️ Cảnh báo lỗi cào dữ liệu dự báo: {e}")
 
-    # Bản tin dự phòng nếu nghẽn mạng API
     if not forecast_summary:
-        forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
+        forecast_summary = "- Xuuyên 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
 
-    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG TỪ KNOWLEDGE BASE ĐÃ GROUNDING ──
+    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG ĐỂ LÀM GROUNDING ──
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
-    
     if knowledge:
         crop_title = crop.upper().replace("_", " ")
         strict_rules_text = "\n".join([f"- {rule}" for rule in knowledge["rules"]])
@@ -149,47 +145,68 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
         strict_rules_text = "- Giữ ẩm cho đất trồng, bón phân cân đối, căng lưới lan chống nắng hè và chủ động quản lý nguồn nước tưới."
 
-    # ──> BƯỚC 1.5: TÍNH GIỜ CHUẨN VIỆT NAM (UTC+7) ĐỂ CHỐNG NGÁO THỜI GIAN ──
-    # Render chạy giờ UTC nên ta ép cộng thêm 7 tiếng để ra giờ Việt Nam chính xác
+    # ──> BƯỚC 1.5: TÍNH GIỜ CHUẨN VIỆT NAM (UTC+7) ──
     vn_now = datetime.now(timezone.utc) + timedelta(hours=7)
     current_date_vn = vn_now.strftime("%d/%m/%Y")
     current_time_vn = vn_now.strftime("%H:%M")
 
-    # ──> BƯỚC 2: TRIỆU HỒI GEMINI VÀ ÁP ĐẶT VÒNG KIM CÔ THỜI GIAN ──
+    # ──> BƯỚC 2: THIẾT LẬP INPUT NỘI DUNG VÀ HỆ THỐNG CHỈ THỊ GỐC ──
+    user_content = f"""
+    📊 DỰ BÁO THỜI TIẾT 3 NGÀY TỚI TỪ API:
+    {forecast_summary}
+
+    📋 SỔ TAY KỸ THUẬT BẰT BUỘC:
+    {strict_rules_text}
+
+    ⏰ MỐC THỜI GIAN ĐỒNG HỒ THỰC TẾ:
+    - Bây giờ là {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để định vị hôm nay/ngày mai cho đúng lịch thực tế tại Việt Nam.
+    """
+
+    system_instruction_text = """
+    Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội.
+    Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật được cấp thành lời dặn dồi bình dị, chân chất như người trong họ dặn dò nhau.
+
+    ⚠️ ĐIỀU KHOẢN VẬN HÀNH NGHIÊM NGẶT (BAO GROUNDING):
+    1. Chỉ đưa ra khuyến nghị hành động dựa trên 100% thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC", tuyệt đối không tự chế tên thuốc bảo vệ thực vật hay cơ chế sinh học lạ nằm ngoài danh sách.
+    2. Đối chiếu mốc thời gian đồng hồ thực tế để gọi tên 'hôm nay', 'ngày mai' chuẩn xác, tránh ngáo giờ ban đêm.
+    3. Văn phong liền mạch thành một đoạn văn ngắn gọn (4 câu), TUYỆT ĐỐI không dùng ký tự Markdown bôi đậm ** hoặc các dấu gạch đầu dòng -.
+    """
+
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
-        prompt = f"""
-        Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội. 
-        Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật thành lời dặn dò bình dị cho bà con trong họ.
-
-        ⏰ MỐC THỜI GIAN THỰC TẾ ĐỒNG HỒ TẠI VIỆT NAM (BẮT BUỘC ĐỐI CHIẾU):
-        - Bây giờ chính xác đang là: {current_time_vn} ngày {current_date_vn}.
-        - Hãy dùng mốc này để định vị đâu là hôm nay, đâu là ngày mai. Nếu mốc này đã là khung giờ đêm muộn, hãy hiểu ngày tiếp theo trong danh sách lịch dưới đây mới là ngày mai!
-
-        📊 1. DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG 3 NGÀY TỚI TỪ API:
-        {forecast_summary}
-
-        📋 2. SỔ TAY KỸ THUẬT BẮT BUỘC (TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ Ý CHẾ THÊM BIỆN PHÁP KHÁC NẰM NGOÀI DANH SÁCH):
-        {strict_rules_text}
-
-        🚨 ĐIỀU KHOẢN CHỐNG ẢO GIÁC & SAI LỆCH THỜI GIAN (THI HÀNH NGHIÊM NGẶT):
-        - Đối chiếu kỹ mốc thời gian thực tế ở trên để gọi tên 'hôm nay', 'ngày mai' cho đúng thực tế, tuyệt đối không gọi nhầm ngày đang diễn ra hoặc đã qua là ngày mai.
-        - Chỉ đưa ra khuyến nghị hành động dựa trên 100% thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với tình hình thời tiết dự báo.
-        - Văn phong mộc mạc của nhà nông, viết liền mạch thành một đoạn văn ngắn gọn (4 câu), không dùng ký tự Markdown bôi đậm ** hay dấu gạch đầu dòng.
-        """
-        try:
-            response = ai_client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-            )
-            recommendation_text = response.text.strip()
-        except Exception as e:
-            print(f"⚠️ Sự cố gọi Gemini API: {e}")
+        # 🔥 ĐÓNG GÓI BỘ CẤU HÌNH TỐI ƯU HÓA CAO CẤP CHÍNH HÃNG GOOGLE 🔥
+        config_setup = types.GenerateContentConfig(
+            system_instruction=system_instruction_text,  # Ép làm chỉ thị gốc
+            temperature=0.2,                             # Giảm tối đa độ phiêu, tăng tốc độ phản hồi
+            max_output_tokens=300                        # Khống chế chiều dài, tiết kiệm token tối đa
+        )
+        
+        # 🔥 THIẾT LẬP LŨY TIẾN EXPONENTIAL BACKOFF VỚI JITTER KHÁNG LỖI 503 🔥
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                print(f"🤖 Đang nã cuộc gọi tối ưu lên Gemini API (Lần {attempt + 1}/{max_retries})...")
+                response = ai_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=user_content,
+                    config=config_setup
+                )
+                recommendation_text = response.text.strip()
+                if recommendation_text:
+                    print("🟩 Gọi Gemini API thành công rực rỡ với cấu hình VIP!")
+                    break
+            except Exception as e:
+                print(f"⚠️ Phát hiện sự cố Gemini API tại lần thử {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    # Tính toán công thức lũy tiến kèm nhiễu ngẫu nhiên Jitter: (2^attempt) + random(0, 1)
+                    sleep_time = (2 ** attempt) + random.uniform(0, 1)
+                    print(f"⏳ Lỗi hệ thống Google. Tự động kích hoạt Backoff, nín thở chờ {sleep_time:.2f} giây...")
+                    time.sleep(sleep_time)
 
     if not recommendation_text:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
 
-    # ──> BƯỚC 3: ĐỒNG GÓI VÀ BẮN TIN VỀ TELEGRAM VỚI BẢN TIN CHUYÊN SÂU ──
+    # ──> BƯỚC 3: ĐỒNG GÓI VÀ ĐẨY BẢN TIN CHUYÊN SÂU VỀ TELEGRAM ──
     final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG V2 - {crop_title}]\n\n{recommendation_text}"
     is_sent = send_telegram_message(text=final_message)
     
@@ -234,7 +251,7 @@ def remote_dashboard():
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.1 • Đã đồng bộ múi giờ VN</p>
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.3 • Tối ưu hóa kiến trúc AI</p>
         </div>
     </body>
     </html>
