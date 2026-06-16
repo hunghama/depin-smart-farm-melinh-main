@@ -1,7 +1,7 @@
 import os
 import sys
 import time  
-import random  # 🔥 Thêm để tính toán nhiễu Jitter khi retry
+import random  
 import requests
 from datetime import datetime, timedelta, timezone  
 from dotenv import load_dotenv
@@ -18,10 +18,10 @@ from fastapi import FastAPI, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse  
 from pydantic import BaseModel, Field
-from google import genai  # SDK Gemini chính hãng mới nhất
-from google.genai import types  # 🔥 Import bộ định nghĩa kiểu dữ liệu cấu hình của Google
+from google import genai  
+from google.genai import types  
 from backend.storage import MongoStorage
-# 📦 Nạp Sổ tay kỹ thuật chống ảo giác sếp vừa tạo
+# 📦 Nạp Sổ tay kỹ thuật chống ảo giác
 from backend.knowledge import AGRI_KNOWLEDGE_BASE
 
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Telegram Concierge MVP")
@@ -102,11 +102,11 @@ def send_telegram_message(text: str) -> bool:
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW V2.3 KIẾN TRÚC TỐI ƯU CAO CẤP:
-    - Bốc dữ liệu DỰ BÁO LỰA CHỌN dài hạn 3 ngày từ WeatherAPI.
-    - Cấu hình Native System Instruction tách biệt giúp tăng tốc phản hồi.
-    - Áp dụng cơ chế Exponential Backoff + Jitter kháng hoàn toàn lỗi 503 quá tải.
-    - Ép tham số Temperature=0.2 chống AI ngáo ngơ viết nhảm.
+    🔥 CONCIERGE FLOW V2.4 KIẾN TRÚC TOÀN DIỆN:
+    - Bốc dữ liệu DỰ BÁO dài hạn 3 ngày từ WeatherAPI.
+    - Vá lỗi Logic Lock bằng cách đa dạng hóa kịch bản Sổ tay kỹ thuật chung (Nắng/Mưa/Mát).
+    - Cài điều khoản Fallback vào Chỉ thị gốc cho phép AI khuyên chăm sóc bình thường nếu thời tiết đẹp.
+    - Nới rộng max_output_tokens lên 500 tránh nghẹt thở dòng chữ.
     """
     forecast_summary = ""
     
@@ -134,16 +134,21 @@ def trigger_concierge_broadcast(crop: str = "chung"):
         print(f"⚠️ Cảnh báo lỗi cào dữ liệu dự báo: {e}")
 
     if not forecast_summary:
-        forecast_summary = "- Xuuyên 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
+        forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
 
-    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG ĐỂ LÀM GROUNDING ──
+    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG ĐỂ LÀM GROUNDING (VÁ LỖI LOGIC KHÓA) ──
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
     if knowledge:
         crop_title = crop.upper().replace("_", " ")
         strict_rules_text = "\n".join([f"- {rule}" for rule in knowledge["rules"]])
     else:
+        # 🔥 Đã bổ sung đa kịch bản cho Bản tin Chung để né lỗi khóa não khi trời mưa mát
         crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
-        strict_rules_text = "- Giữ ẩm cho đất trồng, bón phân cân đối, căng lưới lan chống nắng hè và chủ động quản lý nguồn nước tưới."
+        strict_rules_text = """
+        - Nếu thời tiết dự báo nắng nóng gắt: Nhắc bà con chú ý giữ ẩm cho đất trồng, bón phân cân đối và căng lưới lan che nắng.
+        - Nếu thời tiết dự báo có mưa dông, mưa lớn: Nhắc bà con khẩn trương kiểm tra bờ ruộng, khơi thông luống rãnh để thoát nước nhanh, tránh ngập úng bộ rễ.
+        - Nếu thời tiết mát mẻ hoặc không kích hoạt thiên tai cực đoan: Dặn bà con tranh thủ làm cỏ, tỉa lá già và chủ động chăm sóc ruộng vườn phát triển tự nhiên như mọi khi.
+        """
 
     # ──> BƯỚC 1.5: TÍNH GIỜ CHUẨN VIỆT NAM (UTC+7) ──
     vn_now = datetime.now(timezone.utc) + timedelta(hours=7)
@@ -155,7 +160,7 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     📊 DỰ BÁO THỜI TIẾT 3 NGÀY TỚI TỪ API:
     {forecast_summary}
 
-    📋 SỔ TAY KỸ THUẬT BẰT BUỘC:
+    📋 SỔ TAY KỸ THUẬT BẮT BUỘC:
     {strict_rules_text}
 
     ⏰ MỐC THỜI GIAN ĐỒNG HỒ THỰC TẾ:
@@ -164,24 +169,22 @@ def trigger_concierge_broadcast(crop: str = "chung"):
 
     system_instruction_text = """
     Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội.
-    Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật được cấp thành lời dặn dồi bình dị, chân chất như người trong họ dặn dò nhau.
+    Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật được cấp thành lời dặn dò bình dị, chân chất như người trong họ dặn dò nhau.
 
     ⚠️ ĐIỀU KHOẢN VẬN HÀNH NGHIÊM NGẶT (BAO GROUNDING):
-    1. Chỉ đưa ra khuyến nghị hành động dựa trên 100% thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC", tuyệt đối không tự chế tên thuốc bảo vệ thực vật hay cơ chế sinh học lạ nằm ngoài danh sách.
+    1. Chỉ đưa ra khuyến nghị hành động dựa trên các thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với thời tiết dự báo. Nếu thời tiết mát mẻ ôn hòa hoặc không trúng kịch bản cực đoan, hãy sử dụng luật dành cho thời tiết mát mẻ/bình thường để dặn bà con ra đồng chăm sóc như mọi khi. Tuyệt đối không tự chế tên thuốc bảo vệ thực vật hay cơ chế sinh học lạ nằm ngoài danh sách.
     2. Đối chiếu mốc thời gian đồng hồ thực tế để gọi tên 'hôm nay', 'ngày mai' chuẩn xác, tránh ngáo giờ ban đêm.
     3. Văn phong liền mạch thành một đoạn văn ngắn gọn (4 câu), TUYỆT ĐỐI không dùng ký tự Markdown bôi đậm ** hoặc các dấu gạch đầu dòng -.
     """
 
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
-        # 🔥 ĐÓNG GÓI BỘ CẤU HÌNH TỐI ƯU HÓA CAO CẤP CHÍNH HÃNG GOOGLE 🔥
         config_setup = types.GenerateContentConfig(
-            system_instruction=system_instruction_text,  # Ép làm chỉ thị gốc
-            temperature=0.2,                             # Giảm tối đa độ phiêu, tăng tốc độ phản hồi
-            max_output_tokens=300                        # Khống chế chiều dài, tiết kiệm token tối đa
+            system_instruction=system_instruction_text,  
+            temperature=0.3,                             
+            max_output_tokens=500  # 🔥 Nới rộng lên 500 tokens để thoải mái nhả chữ không lo nghẹt ngào
         )
         
-        # 🔥 THIẾT LẬP LŨY TIẾN EXPONENTIAL BACKOFF VỚI JITTER KHÁNG LỖI 503 🔥
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -193,14 +196,13 @@ def trigger_concierge_broadcast(crop: str = "chung"):
                 )
                 recommendation_text = response.text.strip()
                 if recommendation_text:
-                    print("🟩 Gọi Gemini API thành công rực rỡ với cấu hình VIP!")
+                    print("🟩 Gọi Gemini API thành công rực rỡ với cấu hình V2.4!")
                     break
             except Exception as e:
                 print(f"⚠️ Phát hiện sự cố Gemini API tại lần thử {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
-                    # Tính toán công thức lũy tiến kèm nhiễu ngẫu nhiên Jitter: (2^attempt) + random(0, 1)
                     sleep_time = (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⏳ Lỗi hệ thống Google. Tự động kích hoạt Backoff, nín thở chờ {sleep_time:.2f} giây...")
+                    print(f"⏳ Tự động kích hoạt Backoff, nín thở chờ {sleep_time:.2f} giây...")
                     time.sleep(sleep_time)
 
     if not recommendation_text:
@@ -251,7 +253,7 @@ def remote_dashboard():
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.3 • Tối ưu hóa kiến trúc AI</p>
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.4 • Đã vá lỗi Logic Lock</p>
         </div>
     </body>
     </html>
