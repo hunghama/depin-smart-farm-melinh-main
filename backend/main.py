@@ -102,11 +102,11 @@ def send_telegram_message(text: str) -> bool:
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung"):
     """
-    🔥 CONCIERGE FLOW V2.4 KIẾN TRÚC TOÀN DIỆN:
+    🔥 CONCIERGE FLOW V2.5 KIẾN TRÚC TOÀN DIỆN - PHÁ VỠ CẠM BẪY CHỮ:
     - Bốc dữ liệu DỰ BÁO dài hạn 3 ngày từ WeatherAPI.
-    - Vá lỗi Logic Lock bằng cách đa dạng hóa kịch bản Sổ tay kỹ thuật chung (Nắng/Mưa/Mát).
-    - Cài điều khoản Fallback vào Chỉ thị gốc cho phép AI khuyên chăm sóc bình thường nếu thời tiết đẹp.
-    - Nới rộng max_output_tokens lên 500 tránh nghẹt thở dòng chữ.
+    - Sửa đổi Chỉ thị gốc từ "Cấm đoán" sang "Hướng dẫn tích cực" bằng cách chỉ định rõ các từ nối thời gian.
+    - Tăng nhẹ Temperature lên 0.4 để giải phóng tư duy ngôn ngữ cho AI, giúp câu viết mượt mà không bị nghẹn câu.
+    - Bắn thẳng bản tin hoàn chỉnh về Telegram.
     """
     forecast_summary = ""
     
@@ -136,13 +136,12 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     if not forecast_summary:
         forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
 
-    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG ĐỂ LÀM GROUNDING (VÁ LỖI LOGIC KHÓA) ──
+    # ──> BƯỚC 1: TRÍCH XUẤT LUẬT CỨNG ĐỂ LÀM GROUNDING ──
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
     if knowledge:
         crop_title = crop.upper().replace("_", " ")
         strict_rules_text = "\n".join([f"- {rule}" for rule in knowledge["rules"]])
     else:
-        # 🔥 Đã bổ sung đa kịch bản cho Bản tin Chung để né lỗi khóa não khi trời mưa mát
         crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
         strict_rules_text = """
         - Nếu thời tiết dự báo nắng nóng gắt: Nhắc bà con chú ý giữ ẩm cho đất trồng, bón phân cân đối và căng lưới lan che nắng.
@@ -167,22 +166,23 @@ def trigger_concierge_broadcast(crop: str = "chung"):
     - Bây giờ là {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để định vị hôm nay/ngày mai cho đúng lịch thực tế tại Việt Nam.
     """
 
+    # 🔥 ĐÃ NÂNG CẤP CHỈ THỊ GỐC SANG HƯỚNG DẪN TÍCH CỰC, XÓA BỎ LỆNH CẤM DỮ DẰN 🔥
     system_instruction_text = """
     Bạn là một trợ lý khuyến nông số thực địa tại huyện Mê Linh, Hà Nội.
     Nhiệm vụ của bạn là dịch dữ liệu thời tiết và luật kỹ thuật được cấp thành lời dặn dò bình dị, chân chất như người trong họ dặn dò nhau.
 
-    ⚠️ ĐIỀU KHOẢN VẬN HÀNH NGHIÊM NGẶT (BAO GROUNDING):
-    1. Chỉ đưa ra khuyến nghị hành động dựa trên các thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với thời tiết dự báo. Nếu thời tiết mát mẻ ôn hòa hoặc không trúng kịch bản cực đoan, hãy sử dụng luật dành cho thời tiết mát mẻ/bình thường để dặn bà con ra đồng chăm sóc như mọi khi. Tuyệt đối không tự chế tên thuốc bảo vệ thực vật hay cơ chế sinh học lạ nằm ngoài danh sách.
+    📋 QUY TẮC PHÁT NGÔN BẮT BUỘC (BAO GROUNDING):
+    1. Chỉ đưa ra khuyến nghị hành động dựa trên các thông tin quy định tại "SỔ TAY KỸ THUẬT BẮT BUỘC" phù hợp với thời tiết dự báo. Tuyệt đối không tự chế tên thuốc bảo vệ thực vật hay hóa chất lạ nằm ngoài danh sách.
     2. Đối chiếu mốc thời gian đồng hồ thực tế để gọi tên 'hôm nay', 'ngày mai' chuẩn xác, tránh ngáo giờ ban đêm.
-    3. Văn phong liền mạch thành một đoạn văn ngắn gọn (4 câu), TUYỆT ĐỐI không dùng ký tự Markdown bôi đậm ** hoặc các dấu gạch đầu dòng -.
+    3. CẤU TRÚC VĂN BẢN: Hãy viết thành một đoạn văn xuôi liên tục và mượt mà hoàn chỉnh (khoảng 4-5 câu). Hãy dùng các cụm từ nối thời gian như "Đối với hôm nay...", "Sang đến ngày mai...", "Còn như ngày kia..." để liên kết nội dung các ngày lại với nhau. Phân tách các ý bằng dấu chấm câu (.) và dấu phẩy (,) thông thường. Không viết biểu tượng gạch đầu dòng, không dùng ký tự bôi đậm.
     """
 
     recommendation_text = ""
     if ai_client and os.getenv("GEMINI_API_KEY"):
         config_setup = types.GenerateContentConfig(
             system_instruction=system_instruction_text,  
-            temperature=0.3,                             
-            max_output_tokens=500  # 🔥 Nới rộng lên 500 tokens để thoải mái nhả chữ không lo nghẹt ngào
+            temperature=0.4,  # 🔥 Tăng nhẹ lên 0.4 để tăng độ linh hoạt ngôn từ, giải phóng khóa não
+            max_output_tokens=500  
         )
         
         max_retries = 3
@@ -196,7 +196,7 @@ def trigger_concierge_broadcast(crop: str = "chung"):
                 )
                 recommendation_text = response.text.strip()
                 if recommendation_text:
-                    print("🟩 Gọi Gemini API thành công rực rỡ với cấu hình V2.4!")
+                    print("🟩 Gọi Gemini API thành công rực rỡ với cấu hình V2.5!")
                     break
             except Exception as e:
                 print(f"⚠️ Phát hiện sự cố Gemini API tại lần thử {attempt + 1}: {e}")
@@ -253,7 +253,7 @@ def remote_dashboard():
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.4 • Đã vá lỗi Logic Lock</p>
+            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.5 • Phá vỡ bẫy logic AI</p>
         </div>
     </body>
     </html>
