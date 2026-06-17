@@ -17,11 +17,12 @@ from fastapi import FastAPI, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse  
 from pydantic import BaseModel, Field
-from google import genai  
+from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
+# 📦 Nạp Sổ tay kỹ thuật chống ảo giác
 from backend.knowledge import AGRI_KNOWLEDGE_BASE
 
-app = FastAPI(title="Smart Farm Mê Linh API v1 - Secure Concierge")
+app = FastAPI(title="Smart Farm Mê Linh API v1 - Market Ready MVP")
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,14 +34,16 @@ app.add_middleware(
 
 storage = MongoStorage()
 
-# 🔥 1. NẠP MÃ KHÓA BẢO MẬT TỪ SERVER RENDER VÀO CODE
+# NẠP MÃ KHÓA BẢO MẬT (ĐÃ BẢO TOÀN TỪ V2.7)
 CRON_SECRET_TOKEN = os.getenv("CRON_SECRET_TOKEN")
 
+# Khởi tạo Client Gemini
 try:
     ai_client = genai.Client()
 except Exception as e:
     print(f"⚠️ Cảnh báo: Chưa cấu hình được Gemini Client: {e}")
     ai_client = None
+
 
 # =====================================================================
 # 🌤️ RECEIVE WEATHER DATA (GIỮ NGUYÊN)
@@ -73,22 +76,36 @@ def send_telegram_message(text: str) -> bool:
     except Exception:
         return False
 
+
 # =====================================================================
-# 🚀 ENDPOINT KÍCH HOẠT PHÁT TIN (BẢN V2.7 KHÓA BẢO MẬT)
+# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (CÁ NHÂN HÓA TUỔI CÂY THUẦN PHẦN MỀM)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
-def trigger_concierge_broadcast(crop: str = "chung", token: str = None):
+def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: str = None):
     """
-    🔥 CONCIERGE FLOW V2.7 SECURE: Chống spam bằng tham số mật mã 'token'
+    🔥 CONCIERGE FLOW V2.8 MARKET-READY: 
+    - Bảo mật Token chặn spam công khai.
+    - Nhận số ngày tuổi của cây `days_old` để cá nhân hóa lời khuyên sâu bằng phần mềm.
     """
-    # 🔥 2. CÀI ĐẶT ÔNG BẢO VỆ ĐỨNG ĐÓN CỬA endpoint
+    # ──> KIỂM TRA BẢO MẬT (TOKEN LOCK) ──
     if CRON_SECRET_TOKEN and token != CRON_SECRET_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Xác thực thất bại: Mã khóa Secret Token không hợp lệ hoặc thiếu quyền truy cập!"
+            detail="Xác thực thất bại: Quyền truy cập bị từ chối!"
         )
 
+    # ──> PHÂN TÍCH GIAI ĐOẠN SINH TRƯỞNG THUẦN PHẦN MỀM ──
+    stage_text = "Giai đoạn phát triển chung"
+    if days_old > 0:
+        if days_old <= 10:
+            stage_text = f"Cây non vừa xuống giống được {days_old} ngày (Bộ rễ còn rất yếu, dễ bị rửa trôi hạt hoặc úng chết giống)"
+        elif days_old <= 45:
+            stage_text = f"Cây đang tăng trưởng mạnh được {days_old} ngày (Cần nhiều dinh dưỡng, phân bón và độ ẩm ổn định)"
+        else:
+            stage_text = f"Cây giai đoạn cuối được {days_old} ngày, chuẩn bị ra hoa làm hạt/thu hoạch (Cần bảo vệ hoa, tránh rụng trái hoặc thối nông sản)"
+
     forecast_summary = ""
+    # ──> BƯỚC 0: CÀO XU HƯỚNG DỰ BÁO THỜI TIẾT 3 NGÀY ──
     try:
         api_key = os.getenv("WEATHER_API_KEY")
         if api_key:
@@ -110,6 +127,7 @@ def trigger_concierge_broadcast(crop: str = "chung", token: str = None):
     if not forecast_summary:
         forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
 
+    # ──> BƯỚC 1: TRÍCH XUẤT SỔ TAY KỸ THUẬT GỐC ──
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
     if knowledge:
         crop_title = crop.upper().replace("_", " ")
@@ -126,24 +144,28 @@ def trigger_concierge_broadcast(crop: str = "chung", token: str = None):
     current_date_vn = vn_now.strftime("%d/%m/%Y")
     current_time_vn = vn_now.strftime("%H:%M")
 
+    # ──> BƯỚC 2: KHUNG PROMPT MẠNH MẼ, ÉP AI TƯ DUY THEO TUỔI CÂY THỰC TẾ ──
     prompt = f"""
-    Bạn là một trợ lý khuyến nông số am hiểu thực địa tại huyện Mê Linh, Hà Nội.
-    Hãy phân tích dữ liệu thời tiết 3 ngày tới và đối chiếu Sổ tay kỹ thuật dưới đây để viết một bản tin dặn dò hoàn chỉnh, liền mạch gửi cho bà con trong họ.
+    Bạn là một cố vấn nông nghiệp số thực địa tại Mê Linh, Hà Nội.
+    Hãy phân tích thời tiết và Sổ tay kỹ thuật dưới đây để viết lời dặn dò ĐỘC BẢN, CÁ NHÂN HÓA SÂU cho ruộng của hộ dân này.
+
+    📋 THÔNG TIN THỰC ĐỊA CỦA RUỘNG HỘ DÂN:
+    - Loại cây trồng: {crop_title}
+    - Tình trạng sinh trưởng hiện tại: {stage_text}
 
     ⏰ MỐC THỜI GIAN ĐỒNG HỒ THỰC TẾ:
-    - Bây giờ đang là: {current_time_vn} ngày {current_date_vn}. Hãy dùng mốc này để gọi tên 'hôm nay', 'ngày mai' cho đúng lịch thực tế tại Việt Nam.
+    - Bây giờ là {current_time_vn} ngày {current_date_vn}.
 
-    📊 DỰ BÁO THỜI TIẾT ĐỊA PHƯƠNG TỪ API:
+    📊 DỰ BÁO THỜI TIẾT TỪ API:
     {forecast_summary}
 
-    📋 SỔ TAY KỸ THUẬT BẮT BUỘC ĐỂ KHUYÊN BÀ CON:
+    📋 SỔ TAY KỸ THUẬT BẮT BUỘC:
     {strict_rules_text}
 
-    🚨 YÊU CẦU ĐỊNH DẠNG BẢN TIN (BẮT BUỘC TUÂN THỦ):
-    1. BẮT BUỘC phải lồng ghép khéo léo thông tin số liệu về nhiệt độ và tình trạng thời tiết cụ thể của từng ngày vào nội dung dặn dò để bản tin có số liệu trực quan cho bà con nắm bắt.
-    2. Phải viết thành một đoạn văn xuôi hoàn chỉnh, mượt mà từ đầu đến cuối (khoảng 5-6 câu), tuyệt đối không được dừng câu giữa chừng hoặc bỏ lửng văn bản.
-    3. Lời dặn dò mộc mạc, bình dị, chân chất như người trong gia đình nói với nhau.
-    4. Không dùng dấu gạch đầu dòng, không dùng ký tự bôi đậm ** trong bài viết.
+    🚨 YÊU CẦU BIÊN SOẠN BẢN TIN (BẮT BUỘC QUYẾT ĐỊNH):
+    1. Lời khuyên hành động phải ĐẶC BIỆT PHÙ HỢP với "Tình trạng sinh trưởng hiện tại" (Tuổi cây) nêu trên kết hợp với tình hình thời tiết. (Ví dụ: Nếu trời mưa to mà cây còn non thì dặn kỹ chuyện rửa trôi hạt gieo, nếu cây lớn thì dặn chống ngập úng rễ hoặc thối nông sản).
+    2. BẮT BUỘC phải lồng ghép khéo léo thông tin số liệu về nhiệt độ của từng ngày vào đoạn văn.
+    3. Viết thành một đoạn văn xuôi liên tục, mượt mà từ đầu đến cuối (5-6 câu), văn phong chân chất của nhà nông. Không dùng gạch đầu dòng, không dùng bôi đậm **.
     """
 
     recommendation_text = ""
@@ -160,7 +182,7 @@ def trigger_concierge_broadcast(crop: str = "chung", token: str = None):
     if not recommendation_text or len(recommendation_text) < 60:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
 
-    final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG V2 - {crop_title}]\n\n{recommendation_text}"
+    final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG MVP - {crop_title}]\n\n{recommendation_text}"
     is_sent = send_telegram_message(text=final_message)
     
     if is_sent:
@@ -168,12 +190,12 @@ def trigger_concierge_broadcast(crop: str = "chung", token: str = None):
     else:
         raise HTTPException(status_code=500, detail="Lỗi kết nối cổng Telegram")
 
+
 # =====================================================================
-# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA CHỐNG QUÊN LINK (HỖ TRỢ TRUYỀN TOKEN TỰ ĐỘNG)
+# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA MVP THƯƠNG MẠI CHUYÊN NGHIỆP
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 def remote_dashboard(token: str = None):
-    # Tự động gài đuôi mật mã vào các nút bấm dựa trên token sếp truyền vào trang chủ
     token_suffix = f"&token={token}" if token else ""
     token_prefix = f"?token={token}" if token else ""
     
@@ -183,31 +205,33 @@ def remote_dashboard(token: str = None):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Smart Farm Mê Linh - Secure Panel</title>
+        <title>Smart Farm Mê Linh - MVP Panel</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     </head>
     <body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col justify-center items-center p-4">
         <div class="bg-slate-800 p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-700 text-center">
-            <h1 class="text-xl font-bold text-emerald-400 mb-2">🚀 SMART FARM MÊ LINH v2.7</h1>
-            <p class="text-xs text-slate-400 mb-6">Bảng điều khiển phát tin có khóa bảo mật</p>
+            <h1 class="text-xl font-bold text-emerald-400 mb-2">🚜 SMART FARM MÊ LINH v2.8</h1>
+            <p class="text-xs text-slate-400 mb-6">Bảng điều khiển mô phỏng MVP Thương Mại</p>
             
-            <div class="space-y-4">
-                <a href="/api/v1/zalo/broadcast{token_prefix}" target="_blank" class="block w-full py-3 bg-emerald-600 hover:bg-emerald-500 font-medium rounded-xl transition shadow-md no-underline">
-                    📢 Phát Bản Tin Chung (6h Sáng)
+            <div class="space-y-4 text-left">
+                <p class="text-xs font-semibold text-slate-300">🎯 KIỂM THỬ KỊCH BẢN THUẦN PHẦN MỀM:</p>
+                
+                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-sm font-medium rounded-xl transition text-center no-underline">
+                    🌽 Ruộng Ngô Ngọt MỚI GIEO (5 Ngày Tuổi)
                 </a>
+                
+                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=55{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-yellow-600 hover:bg-yellow-500 text-sm font-medium rounded-xl transition text-center text-slate-900 no-underline">
+                    🌽 Ruộng Ngô SẮP THU HOẠCH (55 Ngày Tuổi)
+                </a>
+                
                 <hr class="border-slate-700 my-2">
-                <a href="/api/v1/zalo/broadcast?crop=rau_muong{token_suffix}" target="_blank" class="block w-full py-3 bg-teal-600 hover:bg-teal-500 font-medium rounded-xl transition shadow-md no-underline">
-                    🥬 Kích Hoạt Đội Rau Muống Hè
-                </a>
-                <a href="/api/v1/zalo/broadcast?crop=muop_bi{token_suffix}" target="_blank" class="block w-full py-3 bg-cyan-600 hover:bg-cyan-500 font-medium rounded-xl transition shadow-md no-underline">
-                    🥒 Kích Hoạt Hội Mướp - Bí Xanh
-                </a>
-                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot{token_suffix}" target="_blank" class="block w-full py-3 bg-amber-600 hover:bg-amber-500 font-medium rounded-xl transition shadow-md no-underline">
-                    🌽 Kích Hoạt Vùng Ngô Ngọt
+                
+                <a href="/api/v1/zalo/broadcast?crop=muop_bi&days_old=8{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-cyan-600 hover:bg-cyan-500 text-sm font-medium rounded-xl transition text-center no-underline">
+                    🥒 Mướp Bí Giai Đoạn Cây Non (8 Ngày Tuổi)
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Production-ready system v2.7 • Protected by Secret Token</p>
+            <p class="text-[10px] text-slate-500 mt-6">Pure Software MVP Commercial Grade v2.8</p>
         </div>
     </body>
     </html>
