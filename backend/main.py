@@ -21,6 +21,8 @@ from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
 # 📦 Nạp Sổ tay kỹ thuật chống ảo giác
 from backend.knowledge import AGRI_KNOWLEDGE_BASE
+# 🛡️ NẠP HẠ TẦNG MINH CHỨNG TỰ ĐỘNG SPRINT 2
+from backend.provenance import ProvenanceEngine
 
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Market Ready MVP")
 
@@ -33,15 +35,17 @@ app.add_middleware(
 )
 
 storage = MongoStorage()
+# Khởi tạo bộ máy tự động sinh dấu chân số nông sản
+provenance_engine = ProvenanceEngine(storage_client=storage)
 
-# NẠP MÃ KHÓA BẢO MẬT (ĐÃ BẢO TOÀN TỪ V2.7)
+# NẠP MÃ KHÓA BẢO MẬT
 CRON_SECRET_TOKEN = os.getenv("CRON_SECRET_TOKEN")
 
 # Khởi tạo Client Gemini
 try:
     ai_client = genai.Client()
 except Exception as e:
-    print(f"⚠️ Cảnh báo: Chưa cấu hình được Gemini Client: {e}")
+    print(f"⚠️ Cảnh báo: Unconfigured Gemini Client: {e}")
     ai_client = None
 
 
@@ -78,14 +82,15 @@ def send_telegram_message(text: str) -> bool:
 
 
 # =====================================================================
-# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (CÁ NHÂN HÓA TUỔI CÂY THUẦN PHẦN MỀM)
+# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (ĐÃ ĐẤU NỐI MINH CHỨNG TỰ ĐỘNG)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: str = None):
     """
-    🔥 CONCIERGE FLOW V2.8 MARKET-READY: 
-    - Bảo mật Token chặn spam công khai.
-    - Nhận số ngày tuổi của cây `days_old` để cá nhân hóa lời khuyên sâu bằng phần mềm.
+    🔥 CONCIERGE FLOW V2.8 MARKET-READY + PROVENANCE ENGINE: 
+    - Chống spam bằng Token Lock.
+    - Cá nhân hóa lời dặn theo tuổi cây.
+    - TỰ ĐỘNG sinh chứng chỉ số bất biến xuất thẳng cho chuỗi siêu thị.
     """
     # ──> KIỂM TRA BẢO MẬT (TOKEN LOCK) ──
     if CRON_SECRET_TOKEN and token != CRON_SECRET_TOKEN:
@@ -98,14 +103,13 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     stage_text = "Giai đoạn phát triển chung"
     if days_old > 0:
         if days_old <= 10:
-            stage_text = f"Cây non vừa xuống giống được {days_old} ngày (Bộ rễ còn rất yếu, dễ bị rửa trôi hạt hoặc úng chết giống)"
+            stage_text = f"Cây non vừa xuống giống được {days_old} ngày (Bộ rễ yếu, dễ rửa trôi)"
         elif days_old <= 45:
-            stage_text = f"Cây đang tăng trưởng mạnh được {days_old} ngày (Cần nhiều dinh dưỡng, phân bón và độ ẩm ổn định)"
+            stage_text = f"Cây tăng trưởng mạnh được {days_old} ngày (Cần độ ẩm ổn định)"
         else:
-            stage_text = f"Cây giai đoạn cuối được {days_old} ngày, chuẩn bị ra hoa làm hạt/thu hoạch (Cần bảo vệ hoa, tránh rụng trái hoặc thối nông sản)"
+            stage_text = f"Cây giai đoạn cuối được {days_old} ngày, chuẩn bị thu hoạch"
 
     forecast_summary = ""
-    # ──> BƯỚC 0: CÀO XU HƯỚNG DỰ BÁO THỜI TIẾT 3 NGÀY ──
     try:
         api_key = os.getenv("WEATHER_API_KEY")
         if api_key:
@@ -125,26 +129,22 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
         pass
 
     if not forecast_summary:
-        forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng cao điểm hè, nhiệt độ duy trì mức cao 29-37°C, oi bức về đêm."
+        forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng hè cao điểm, nhiệt độ duy trì 29-37°C."
 
-    # ──> BƯỚC 1: TRÍCH XUẤT SỔ TAY KỸ THUẬT GỐC ──
+    # ──> TRÍCH XUẤT SỔ TAY KỸ THUẬT GỐC ──
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
     if knowledge:
         crop_title = crop.upper().replace("_", " ")
         strict_rules_text = "\n".join([f"- {rule}" for rule in knowledge["rules"]])
     else:
         crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
-        strict_rules_text = """
-        - Nếu thời tiết dự báo nắng nóng gắt: Nhắc bà con chú ý giữ ẩm cho đất trồng, bón phân cân đối và căng lưới lan che nắng.
-        - Nếu thời tiết dự báo có mưa dông, mưa lớn: Nhắc bà con khẩn trương kiểm tra bờ ruộng, khơi thông luống rãnh để thoát nước nhanh, tránh ngập úng bộ rễ.
-        - Nếu thời tiết mát mẻ hoặc không có thiên tai cực đoan: Dặn bà con tranh thủ ra đồng làm cỏ, tỉa lá già và chủ động chăm sóc ruộng vườn phát triển tự nhiên như mọi khi.
-        """
+        strict_rules_text = "- Bà con chủ động giữ ẩm ruộng màu và theo dõi sát thời tiết cực đoan."
 
     vn_now = datetime.now(timezone.utc) + timedelta(hours=7)
     current_date_vn = vn_now.strftime("%d/%m/%Y")
     current_time_vn = vn_now.strftime("%H:%M")
 
-    # ──> BƯỚC 2: KHUNG PROMPT MẠNH MẼ, ÉP AI TƯ DUY THEO TUỔI CÂY THỰC TẾ ──
+    # ──> KHUNG PROMPT ÉP AI TƯ DUY THEO TUỔI CÂY THỰC TẾ ──
     prompt = f"""
     Bạn là một cố vấn nông nghiệp số thực địa tại Mê Linh, Hà Nội.
     Hãy phân tích thời tiết và Sổ tay kỹ thuật dưới đây để viết lời dặn dò ĐỘC BẢN, CÁ NHÂN HÓA SÂU cho ruộng của hộ dân này.
@@ -163,7 +163,7 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     {strict_rules_text}
 
     🚨 YÊU CẦU BIÊN SOẠN BẢN TIN (BẮT BUỘC QUYẾT ĐỊNH):
-    1. Lời khuyên hành động phải ĐẶC BIỆT PHÙ HỢP với "Tình trạng sinh trưởng hiện tại" (Tuổi cây) nêu trên kết hợp với tình hình thời tiết. (Ví dụ: Nếu trời mưa to mà cây còn non thì dặn kỹ chuyện rửa trôi hạt gieo, nếu cây lớn thì dặn chống ngập úng rễ hoặc thối nông sản).
+    1. Lời khuyên hành động phải ĐẶC BIỆT PHÙ HỢP với "Tình trạng sinh trưởng hiện tại".
     2. BẮT BUỘC phải lồng ghép khéo léo thông tin số liệu về nhiệt độ của từng ngày vào đoạn văn.
     3. Viết thành một đoạn văn xuôi liên tục, mượt mà từ đầu đến cuối (5-6 câu), văn phong chân chất của nhà nông. Không dùng gạch đầu dòng, không dùng bôi đậm **.
     """
@@ -180,13 +180,26 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
                 time.sleep(2)
 
     if not recommendation_text or len(recommendation_text) < 60:
-        recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát tình hình thời tiết cực đoan."
+        recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu."
 
-    final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG MVP - {crop_title}]\n\n{recommendation_text}"
+    # ──> 🔥 BƯỚC ĐẤU NỐI: TỰ ĐỘNG SINH CHỨNG CHỈ SỐ MINH CHỨNG ĐỘC BẢN ──
+    provenance_record = provenance_engine.build_provenance_footprint(
+        crop=crop,
+        stage=stage_text,
+        weather_text=forecast_summary,
+        ai_text=recommendation_text
+    )
+
+    final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG MVP - {crop_title}]\n\n{recommendation_text}\n\n🔑 [MÃ MINH CHỨNG SỐ VIETGAP]: {provenance_record.record_id}\n🛡️ [CHỮ KÝ ĐIỆN TỬ]: {provenance_record.verification_hash[:16]}..."
+    
     is_sent = send_telegram_message(text=final_message)
     
     if is_sent:
-        return {"status": "success", "preview": final_message}
+        return {
+            "status": "success", 
+            "preview": final_message,
+            "provenance_metadata": provenance_record.model_dump()
+        }
     else:
         raise HTTPException(status_code=500, detail="Lỗi kết nối cổng Telegram")
 
@@ -197,7 +210,6 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
 @app.get("/", response_class=HTMLResponse)
 def remote_dashboard(token: str = None):
     token_suffix = f"&token={token}" if token else ""
-    token_prefix = f"?token={token}" if token else ""
     
     html_content = f"""
     <!DOCTYPE html>
@@ -211,27 +223,21 @@ def remote_dashboard(token: str = None):
     <body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col justify-center items-center p-4">
         <div class="bg-slate-800 p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-700 text-center">
             <h1 class="text-xl font-bold text-emerald-400 mb-2">🚜 SMART FARM MÊ LINH v2.8</h1>
-            <p class="text-xs text-slate-400 mb-6">Bảng điều khiển mô phỏng MVP Thương Mại</p>
+            <p class="text-xs text-slate-400 mb-6">Bảng điều khiển mô phỏng Hạ tầng minh chứng tự động</p>
             
             <div class="space-y-4 text-left">
-                <p class="text-xs font-semibold text-slate-300">🎯 KIỂM THỬ KỊCH BẢN THUẦN PHẦN MỀM:</p>
+                <p class="text-xs font-semibold text-slate-300">🎯 KÍCH HOẠT PHÁT TIN & ĐÚC CHỨNG CHỈ SỐ:</p>
                 
-                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-sm font-medium rounded-xl transition text-center no-underline">
-                    🌽 Ruộng Ngô Ngọt MỚI GIEO (5 Ngày Tuổi)
+                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-sm font-medium rounded-xl transition text-center no-underline">
+                    🌽 Gieo hạt (5 ngày) + Tự đúc minh chứng
                 </a>
                 
                 <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=55{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-yellow-600 hover:bg-yellow-500 text-sm font-medium rounded-xl transition text-center text-slate-900 no-underline">
-                    🌽 Ruộng Ngô SẮP THU HOẠCH (55 Ngày Tuổi)
-                </a>
-                
-                <hr class="border-slate-700 my-2">
-                
-                <a href="/api/v1/zalo/broadcast?crop=muop_bi&days_old=8{token_suffix}" target="_blank" class="block w-full py-2.5 px-4 bg-cyan-600 hover:bg-cyan-500 text-sm font-medium rounded-xl transition text-center no-underline">
-                    🥒 Mướp Bí Giai Đoạn Cây Non (8 Ngày Tuổi)
+                    🌽 Thu hoạch (55 ngày) + Tự đúc minh chứng
                 </a>
             </div>
             
-            <p class="text-[10px] text-slate-500 mt-6">Pure Software MVP Commercial Grade v2.8</p>
+            <p class="text-[10px] text-slate-500 mt-6">Automated Provenance SaaS Grade v2.8</p>
         </div>
     </body>
     </html>
