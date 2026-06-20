@@ -11,6 +11,8 @@ os.environ["GEMINI_API_KEY"] = "mock_gemini_key"
 os.environ["WEATHER_API_KEY"] = "mock_weather_key"
 
 from backend.main import app
+# 🔥 NẠP THÊM MODULE MINH CHỨNG MỚI ĐỂ CHẠY LƯỚI GÁC CỔNG
+from backend.provenance import ProvenanceEngine, ProvenanceRecord
 
 client = TestClient(app)
 
@@ -31,8 +33,9 @@ def verify_budget_safety(attempt_count: int):
         print("\n🚨 [CIRCUIT BREAKER] Phát hiện nguy cơ Vòng lặp Token vô hạn! Đang ngắt van an toàn...")
         raise CircuitBreakerException("Mạch ngắt kích hoạt: Vượt quá giới hạn tài chính cho phép.")
 
+
 # =====================================================================
-# 🧪 CÁC KỊCH BẢN KIỂM THỬ GÁC CỔNG (TDD LƯỚI AN TOÀN)
+# 🧪 CÁC KỊCH BẢN KIỂM THỬ GÁC CỔNG TẦNG API & STORAGE (SPRINT 1)
 # =====================================================================
 
 def test_weather_input_sanity_check():
@@ -82,8 +85,7 @@ def test_broadcast_endpoint_security_lock():
 def test_broadcast_flow_success_with_mock_api(mock_tg_post, mock_weather_get, mock_gemini_client):
     """
     MÔ PHỎNG THỰC CHIẾN MIỄN PHÍ: 
-    Giả lập cuộc gọi API bên ngoài (Weather, Gemini, Telegram) để chạy test tự động 
-    mà KHÔNG TỐN MỘT XU TIỀN TOKEN NÀO! (Hóa giải triệt để cảnh báo thuế token trong video).
+    Giả lập cuộc gọi API bên ngoài để chạy test tự động mà KHÔNG TỐN TIỀN API.
     """
     # 1. Giả lập API thời tiết trả về kết quả mượt mà
     mock_weather_get.return_value.status_code = 200
@@ -119,6 +121,39 @@ def test_circuit_breaker_execution():
     Kiểm thử hành vi của Mạch ngắt: Đảm bảo nếu vòng lặp cố đấm ăn xôi vượt quá 3 lần,
     hệ thống phải tự kích nổ Exception an toàn thay vì chạy vô tận đốt tài khoản.
     """
-    # Vòng lặp chạy thử nghiệm lần thứ 4 (vượt quá hạn ngạch MAX_DEBUG_ATTEMPTS = 3)
     with pytest.raises(CircuitBreakerException):
         verify_budget_safety(attempt_count=4)
+
+
+# =====================================================================
+# 🧪 KIỂM THỬ HẠ TẦNG MINH CHỨNG NÔNG SẢN TỰ ĐỘNG (SPRINT 2 - Nghi ngờ 12)
+# =====================================================================
+def test_provenance_engine_immutability_and_contract():
+    """
+    Test xem hộp xám Provenance có nhả dữ liệu đúng cấu trúc DTO không
+    và kiểm tra tính năng bảo vệ tính bất biến, chống gian lận dữ liệu (Immutability).
+    """
+    engine = ProvenanceEngine()
+    
+    # Giả lập dữ liệu một lần phát tin ruộng ngô sinh chứng chỉ
+    record = engine.build_provenance_footprint(
+        crop="ngo_ngot",
+        stage="Cây non 5 ngày tuổi",
+        weather_text="Nhiệt độ 35 độ C, nắng nóng gắt",
+        ai_text="Nhắc bà con tưới nước giữ ẩm bổ sung rễ."
+    )
+    
+    # 1. Kiểm tra khít hợp đồng dữ liệu đầu ra xuất cho siêu thị (DTO Contract)
+    assert isinstance(record, ProvenanceRecord)
+    assert record.crop_type == "NGO_NGOT"
+    assert record.record_id.startswith("REC-")
+    assert len(record.verification_hash) == 64  # Độ dài chuẩn mã hóa SHA-256
+    
+    # 2. Kiểm tra tính toàn vẹn: Cùng input bắt buộc phải nhả ra cùng một mã hash duy nhất
+    record_clone = engine.build_provenance_footprint(
+        crop="ngo_ngot",
+        stage="Cây non 5 ngày tuổi",
+        weather_text="Nhiệt độ 35 độ C, nắng nóng gắt",
+        ai_text="Nhắc bà con tưới nước giữ ẩm bổ sung rễ."
+    )
+    assert record.verification_hash == record_clone.verification_hash
