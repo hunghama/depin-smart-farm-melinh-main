@@ -37,8 +37,9 @@ class ProvenanceEngine:
     def build_provenance_footprint(self, crop: str, stage: str, weather_text: str, ai_text: str) -> ProvenanceRecord:
         """
         Hộp xám sâu: Tự động gom dữ liệu thời gian thực để dệt thành chứng chỉ số
+        và kích hoạt lưu trữ vĩnh viễn vào MongoDB Atlas đám mây.
         """
-        vn_time = datetime.now(timezone.utc).isoformat() # Chuẩn hóa thời gian toàn cầu
+        vn_time = datetime.now(timezone.utc).isoformat()  # Chuẩn hóa thời gian toàn cầu
         
         # Payload thô dùng để sinh mỏ neo kiểm tra tính toàn vẹn
         raw_payload = {
@@ -49,7 +50,7 @@ class ProvenanceEngine:
         }
         
         v_hash = self.generate_immutable_hash(raw_payload)
-        record_id = f"REC-{v_hash[:12].upper()}" # Tạo mã bản ghi ngắn gọn chuyên nghiệp
+        record_id = f"REC-{v_hash[:12].upper()}"  # Tạo mã bản ghi ngắn gọn chuyên nghiệp
         
         # Ép dữ liệu vào khuôn Pydantic cứng trước khi nhả ra ngoài
         record = ProvenanceRecord(
@@ -62,8 +63,8 @@ class ProvenanceEngine:
             verification_hash=v_hash
         )
         
-        # Sau này sếp chỉ cần gọi lệnh lưu con record này vào MongoDB ở đây
-        # if self.storage: self.storage.save_provenance(record.model_dump())
+        # 🔥 ĐÃ THÁO XÍCH SPRINT 2: Găm vĩnh viễn bản ghi minh chứng nông sản vào MongoDB Atlas đám mây
+        if self.storage:
+            self.storage.save_provenance_record(record.model_dump())
         
         return record
-
