@@ -22,8 +22,11 @@ class MongoStorage:
             # 1. Giữ nguyên collection cũ cho phần cứng (Gói VIP sau này)
             self.collection = self.db["sensor_logs"]
             
-            # 🔥 THÊM MỚI: Chỉ định collection chứa dữ liệu khí tượng do con bot cào về
+            # 2. Collection chứa dữ liệu khí tượng do con bot cào về
             self.weather_collection = self.db["weather_logs"]
+            
+            # 🔥 THÊM MỚI SPRINT 2: Chỉ định collection chứa chứng chỉ số minh chứng nông sản bất biến
+            self.provenance_collection = self.db["provenance_logs"]
             
         except Exception as e:
             print(f"❌ Không thể khởi tạo kết nối MongoDB Client: {e}")
@@ -42,7 +45,7 @@ class MongoStorage:
             return False
 
     # =====================================================================
-    # 🔥 THÊM MỚI: HÀM LƯU DỮ LIỆU THỜI TIẾT THỜI GIAN THỰC (VÁ LỖI)
+    # 🌤️ HÀM LƯU DỮ LIỆU THỜI TIẾT THỜI GIAN THỰC
     # =====================================================================
     def save_weather_data(self, packet: dict) -> bool:
         """Lưu trữ bản ghi thời tiết tươi từ API vào collection weather_logs"""
@@ -62,7 +65,7 @@ class MongoStorage:
             return False
 
     # =====================================================================
-    # 🔥 THÊM MỚI: INTERFACE ĐỌC DỮ LIỆU THỜI TIẾT MỚI NHẤT CHO FASTAPI
+    # 🌤️ INTERFACE ĐỌC DỮ LIỆU THỜI TIẾT MỚI NHẤT CHO FASTAPI
     # =====================================================================
     def get_latest_weather_data(self) -> dict | None:
         """
@@ -87,3 +90,26 @@ class MongoStorage:
             # Cô lập hoàn toàn lỗi PyMongo tại tầng storage
             print(f"❌ Sự cố truy vấn dữ liệu thời tiết trên MongoDB Atlas: {e}")
             return None
+
+    # =====================================================================
+    # 🔥 THÊM MỚI SPRINT 2: HÀM ĐÚC CHẾT CHỨNG CHỈ SỐ VIETGAP VÀO DATABASE
+    # =====================================================================
+    def save_provenance_record(self, record_dict: dict) -> bool:
+        """
+        Lưu trữ dấu chân số nông sản bất biến vào MongoDB Atlas.
+        Phục vụ việc truy xuất nguồn gốc từ xa của chuỗi siêu thị.
+        """
+        if not self.client:
+            print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi lưu chứng chỉ minh chứng.")
+            return False
+        try:
+            # Tự động găm thêm thời gian tạo bản ghi thực tế trên hệ thống
+            if "created_at" not in record_dict:
+                record_dict["created_at"] = datetime.now(timezone.utc)
+                
+            self.provenance_collection.insert_one(record_dict)
+            print(f"🟩 [Storage] Đã đúc chết mã minh chứng {record_dict.get('record_id')} vào MongoDB Atlas thành công!")
+            return True
+        except PyMongoError as e:
+            print(f"❌ Sự cố lưu chứng chỉ số vào MongoDB Atlas: {e}")
+            return False
