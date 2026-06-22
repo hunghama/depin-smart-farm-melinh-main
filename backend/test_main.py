@@ -17,7 +17,7 @@ from backend.provenance import ProvenanceEngine, ProvenanceRecord
 client = TestClient(app)
 
 # =====================================================================
-# ⚙️ MẠCH NGẮT KHẨN CẤP CHỐNG ĐỐT TIỀN API (Hóa giải Nghi ngờ 8)
+# ⚙️ MẠCH NGẮT KHẨN CẤP CHỐNG ĐỐT TIỀN API
 # =====================================================================
 MAX_DEBUG_ATTEMPTS = 3
 
@@ -72,12 +72,7 @@ def test_broadcast_endpoint_security_lock():
 @patch('backend.main.requests.post')
 @patch('backend.storage.MongoStorage.save_provenance_record', return_value=True)
 def test_broadcast_flow_success_with_mock_api(mock_save_prov, mock_tg_post, mock_weather_get, mock_gemini_client):
-    """
-    MÔ PHỎNG THỰC CHIẾN TOÀN TRÌNH: 
-    Giả lập cuộc gọi API và lưu trữ Database đám mây để chạy test tự động 
-    mà KHÔNG TỐN MỘT XU TIỀN TOKEN NÀO và KHÔNG LÀM BẨN DATA THẬT.
-    """
-    # 1. Giả lập API thời tiết
+    """MÔ PHỎNG THỰC CHIẾN TOÀN TRÌNH KHÔNG TỐN TIỀN TOKEN API"""
     mock_weather_get.return_value.status_code = 200
     mock_weather_get.return_value.json.return_value = {
         "forecast": {
@@ -90,15 +85,12 @@ def test_broadcast_flow_success_with_mock_api(mock_save_prov, mock_tg_post, mock
         }
     }
 
-    # 2. Giả lập Gemini sinh nội dung
     mock_response = MagicMock()
     mock_response.text = "Thưa bà con, thời tiết ngô ngọt đang rất đẹp, chú ý bón thúc phân đầy đủ vào ngày nắng nóng 35 độ C."
     mock_gemini_client.models.generate_content.return_value = mock_response
 
-    # 3. Giả lập cổng Telegram
     mock_tg_post.return_value.json.return_value = {"ok": True}
 
-    # KÍCH HOẠT ĐẦU CUỐI LUỒNG LIVE
     response = client.get("/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5&token=MÊ_LINH_THƯƠNG_MẠI_2026")
     
     assert response.status_code == 200
@@ -114,13 +106,10 @@ def test_circuit_breaker_execution():
 
 
 # =====================================================================
-# 🧪 KIỂM THỬ HẠ TẦNG MINH CHỨNG NÔNG SẢN TỰ ĐỘNG (Nghi ngờ 12)
+# 🧪 KIỂM THỬ HẠ TẦNG MINH CHỨNG NÔNG SẢN TỰ ĐỘNG
 # =====================================================================
 def test_provenance_engine_immutability_and_contract():
-    """
-    Test tính bất biến và màng bảo vệ chống gian lận dữ liệu chứng chỉ.
-    """
-    # Tạo một mock storage để test hành vi gọi lưu trữ
+    """Test tính bất biến và màng bảo vệ chống gian lận dữ liệu chứng chỉ."""
     mock_storage = MagicMock()
     mock_storage.save_provenance_record.return_value = True
     
@@ -133,16 +122,12 @@ def test_provenance_engine_immutability_and_contract():
         ai_text="Nhắc bà con tưới nước giữ ẩm."
     )
     
-    # 1. Kiểm tra khít hợp đồng dữ liệu đầu ra (DTO Contract)
     assert isinstance(record, ProvenanceRecord)
     assert record.crop_type == "NGO_NGOT"
     assert record.record_id.startswith("REC-")
     assert len(record.verification_hash) == 64
-    
-    # 2. Xác nhận hệ thống có gọi lệnh lưu xuống tầng cứng MongoDB
     mock_storage.save_provenance_record.assert_called_once()
     
-    # 3. Kiểm tra tính toàn vẹn toán học của hàm băm
     record_clone = engine.build_provenance_footprint(
         crop="ngo_ngot",
         stage="Cây non 5 ngày tuổi",
@@ -150,3 +135,40 @@ def test_provenance_engine_immutability_and_contract():
         ai_text="Nhắc bà con tưới nước giữ ẩm."
     )
     assert record.verification_hash == record_clone.verification_hash
+
+
+# =====================================================================
+# 🔥 THÊM MỚI SPRINT 3: GÁC CỔNG CỔNG TRA CỨU CÔNG KHAI (MÃ QR SIÊU THỊ)
+# =====================================================================
+@patch('backend.storage.MongoStorage.get_provenance_record')
+def test_get_provenance_endpoint_success(mock_get_record):
+    """Kịch bản 1: Siêu thị quét đúng mã QR -> API nhả kết quả 200 thành công."""
+    # Giả lập dữ liệu sạch bốc từ MongoDB Atlas lên
+    mock_get_record.return_value = {
+        "_id": "648f1234567890abcdef1234",
+        "record_id": "REC-A1B2C3D4E5F6",
+        "timestamp": "2026-06-22T08:00:00Z",
+        "crop_type": "NGO_NGOT",
+        "crop_stage": "Cây non 5 ngày tuổi",
+        "weather_telemetry": "Nhiệt độ 35 độ C",
+        "ai_directive": "Nhắc bà con tưới nước giữ ẩm.",
+        "verification_hash": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+    }
+
+    response = client.get("/api/v1/provenance/REC-A1B2C3D4E5F6")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["data"]["crop_type"] == "NGO_NGOT"
+    mock_get_record.assert_called_once_with("REC-A1B2C3D4E5F6")
+
+
+@patch('backend.storage.MongoStorage.get_provenance_record')
+def test_get_provenance_endpoint_not_found(mock_get_record):
+    """Kịch bản 2: Hacker hoặc siêu thị nhập mã fake bậy bạ -> API chặn đứng nhả lỗi 404."""
+    # Giả lập MongoDB lùng sục không thấy bản ghi nào
+    mock_get_record.return_value = None
+
+    response = client.get("/api/v1/provenance/REC-GIA_MAO_9999")
+    assert response.status_code == 404
+    assert "Không tìm thấy mã minh chứng nông sản hợp lệ" in response.json()["detail"]
+    mock_get_record.assert_called_once_with("REC-GIA_MAO_9999")
