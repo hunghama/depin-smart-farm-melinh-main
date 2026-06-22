@@ -21,7 +21,7 @@ from google import genai  # SDK Gemini chính hãng mới nhất
 from backend.storage import MongoStorage
 # 📦 Nạp Sổ tay kỹ thuật chống ảo giác
 from backend.knowledge import AGRI_KNOWLEDGE_BASE
-# 🛡️ NẠP HẠ TẦNG MINH CHỨNG TỰ ĐỘNG SPRINT 2
+# 🛡️ Nạp hạ tầng minh chứng tự động Sprint 2
 from backend.provenance import ProvenanceEngine
 
 app = FastAPI(title="Smart Farm Mê Linh API v1 - Market Ready MVP")
@@ -82,7 +82,7 @@ def send_telegram_message(text: str) -> bool:
 
 
 # =====================================================================
-# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (ĐÃ ĐẤU NỐI MINH CHỨNG TỰ ĐỘNG)
+# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: str = None):
@@ -92,14 +92,12 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     - Cá nhân hóa lời dặn theo tuổi cây.
     - TỰ ĐỘNG sinh chứng chỉ số bất biến xuất thẳng cho chuỗi siêu thị.
     """
-    # ──> KIỂM TRA BẢO MẬT (TOKEN LOCK) ──
     if CRON_SECRET_TOKEN and token != CRON_SECRET_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
             detail="Xác thực thất bại: Quyền truy cập bị từ chối!"
         )
 
-    # ──> PHÂN TÍCH GIAI ĐOẠN SINH TRƯỞNG THUẦN PHẦN MỀM ──
     stage_text = "Giai đoạn phát triển chung"
     if days_old > 0:
         if days_old <= 10:
@@ -131,20 +129,18 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     if not forecast_summary:
         forecast_summary = "- Xu hướng 3 ngày tới: Nắng nóng hè cao điểm, nhiệt độ duy trì 29-37°C."
 
-    # ──> TRÍCH XUẤT SỔ TAY KỸ THUẬT GỐC ──
     knowledge = AGRI_KNOWLEDGE_BASE.get(crop)
     if knowledge:
         crop_title = crop.upper().replace("_", " ")
         strict_rules_text = "\n".join([f"- {rule}" for rule in knowledge["rules"]])
     else:
         crop_title = "BÀ CON NÔNG SẢN MÊ LINH"
-        strict_rules_text = "- Bà con chủ động giữ ẩm ruộng màu và theo dõi sát thời tiết cực đoan."
+        strict_rules_text = "- Bà con chủ động giữ ẩm ruộng rau màu và theo dõi sát thời tiết cực đoan."
 
     vn_now = datetime.now(timezone.utc) + timedelta(hours=7)
     current_date_vn = vn_now.strftime("%d/%m/%Y")
     current_time_vn = vn_now.strftime("%H:%M")
 
-    # ──> KHUNG PROMPT ÉP AI TƯ DUY THEO TUỔI CÂY THỰC TẾ ──
     prompt = f"""
     Bạn là một cố vấn nông nghiệp số thực địa tại Mê Linh, Hà Nội.
     Hãy phân tích thời tiết và Sổ tay kỹ thuật dưới đây để viết lời dặn dò ĐỘC BẢN, CÁ NHÂN HÓA SÂU cho ruộng của hộ dân này.
@@ -182,7 +178,6 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     if not recommendation_text or len(recommendation_text) < 60:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu."
 
-    # ──> 🔥 BƯỚC ĐẤU NỐI: TỰ ĐỘNG SINH CHỨNG CHỈ SỐ MINH CHỨNG ĐỘC BẢN ──
     provenance_record = provenance_engine.build_provenance_footprint(
         crop=crop,
         stage=stage_text,
@@ -202,6 +197,27 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
         }
     else:
         raise HTTPException(status_code=500, detail="Lỗi kết nối cổng Telegram")
+
+
+# =====================================================================
+# 🔥 THÊM MỚI SPRINT 3: ENDPOINT TRA CỨU MINH CHỨNG SỐ CÔNG KHAI (MÃ QR)
+# =====================================================================
+@app.get("/api/v1/provenance/{record_id}")
+def get_provenance_verification(record_id: str):
+    """
+    CỔNG TRA CỨU CÔNG KHAI (QUÉT MÃ QR SIÊU THỊ):
+    Bốc chứng chỉ số gốc từ MongoDB Atlas lên để đối chiếu minh bạch.
+    """
+    record = storage.get_provenance_record(record_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Thất bại: Không tìm thấy mã minh chứng nông sản hợp lệ cho '{record_id}'!"
+        )
+    return {
+        "status": "success",
+        "data": record
+    }
 
 
 # =====================================================================
