@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime, timezone  # 🔥 THÊM MỚI: Để tự động đóng dấu thời gian thực UTC
+from datetime import datetime, timezone  # Để tự động đóng dấu thời gian thực UTC
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
@@ -25,7 +25,7 @@ class MongoStorage:
             # 2. Collection chứa dữ liệu khí tượng do con bot cào về
             self.weather_collection = self.db["weather_logs"]
             
-            # 🔥 THÊM MỚI SPRINT 2: Chỉ định collection chứa chứng chỉ số minh chứng nông sản bất biến
+            # 3. Collection chứa chứng chỉ số minh chứng nông sản bất biến
             self.provenance_collection = self.db["provenance_logs"]
             
         except Exception as e:
@@ -53,7 +53,6 @@ class MongoStorage:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi lưu dữ liệu thời tiết.")
             return False
         try:
-            # Tự động đóng dấu thời gian UTC nếu gói dữ liệu chưa có để phục vụ việc sort giảm dần
             if "timestamp" not in packet:
                 packet["timestamp"] = datetime.now(timezone.utc)
                 
@@ -68,42 +67,31 @@ class MongoStorage:
     # 🌤️ INTERFACE ĐỌC DỮ LIỆU THỜI TIẾT MỚI NHẤT CHO FASTAPI
     # =====================================================================
     def get_latest_weather_data(self) -> dict | None:
-        """
-        Bốc bản ghi thời tiết mới nhất từ collection weather_logs.
-        Tự động ép kiểu ObjectId sang string để tránh lỗi JSON Serialization ở FastAPI.
-        """
+        """Bốc bản ghi thời tiết mới nhất từ collection weather_logs."""
         if not self.client:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi lấy dữ liệu thời tiết.")
             return None
             
         try:
-            # Sắp xếp theo trường 'timestamp' giảm dần (-1) và chỉ lấy đúng 1 bản ghi duy nhất
             latest = list(self.weather_collection.find().sort("timestamp", -1).limit(1))
-            
             if latest:
                 doc = latest[0]
-                doc["_id"] = str(doc["_id"])  # Ép kiểu ObjectId thành string để né lỗi JSON của FastAPI
+                doc["_id"] = str(doc["_id"])  # Ép kiểu ObjectId thành string né lỗi JSON
                 return doc
-                
             return None
         except PyMongoError as e:
-            # Cô lập hoàn toàn lỗi PyMongo tại tầng storage
             print(f"❌ Sự cố truy vấn dữ liệu thời tiết trên MongoDB Atlas: {e}")
             return None
 
     # =====================================================================
-    # 🔥 THÊM MỚI SPRINT 2: HÀM ĐÚC CHẾT CHỨNG CHỈ SỐ VIETGAP VÀO DATABASE
+    # 🛡️ HÀM ĐÚC CHẾT CHỨNG CHỈ SỐ VIETGAP VÀO DATABASE
     # =====================================================================
     def save_provenance_record(self, record_dict: dict) -> bool:
-        """
-        Lưu trữ dấu chân số nông sản bất biến vào MongoDB Atlas.
-        Phục vụ việc truy xuất nguồn gốc từ xa của chuỗi siêu thị.
-        """
+        """Lưu trữ dấu chân số nông sản bất biến vào MongoDB Atlas."""
         if not self.client:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi lưu chứng chỉ minh chứng.")
             return False
         try:
-            # Tự động găm thêm thời gian tạo bản ghi thực tế trên hệ thống
             if "created_at" not in record_dict:
                 record_dict["created_at"] = datetime.now(timezone.utc)
                 
@@ -113,3 +101,28 @@ class MongoStorage:
         except PyMongoError as e:
             print(f"❌ Sự cố lưu chứng chỉ số vào MongoDB Atlas: {e}")
             return False
+
+    # =====================================================================
+    # 🔥 THÊM MỚI SPRINT 3: HÀM TRUY VẾT BỐC CHỨNG CHỈ SỐ TỪ MÃ RECORD_ID
+    # =====================================================================
+    def get_provenance_record(self, record_id: str) -> dict | None:
+        """
+        Lùng sục và bốc chính xác chứng chỉ số dựa vào mã record_id.
+        Phục vụ cổng tra cứu công khai bằng mã QR của siêu thị.
+        """
+        if not self.client:
+            print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi tra cứu chứng chỉ.")
+            return None
+            
+        try:
+            # Tìm kiếm bản ghi khít 100% mã record_id (Ví dụ: REC-A1B2C3D4E5F6)
+            record = self.provenance_collection.find_one({"record_id": record_id})
+            
+            if record:
+                record["_id"] = str(record["_id"])  # Ép kiểu ObjectId của MongoDB sang String
+                return record
+                
+            return None
+        except PyMongoError as e:
+            print(f"❌ Sự cố truy vấn mã minh chứng {record_id} trên MongoDB Atlas: {e}")
+            return None
