@@ -200,24 +200,132 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
 
 
 # =====================================================================
-# 🔥 THÊM MỚI SPRINT 3: ENDPOINT TRA CỨU MINH CHỨNG SỐ CÔNG KHAI (MÃ QR)
+# ⚙️ ENDPOINT TRA CỨU JSON DÀNH CHO LẬP TRÌNH VIÊN (SPRINT 3)
 # =====================================================================
 @app.get("/api/v1/provenance/{record_id}")
 def get_provenance_verification(record_id: str):
-    """
-    CỔNG TRA CỨU CÔNG KHAI (QUÉT MÃ QR SIÊU THỊ):
-    Bốc chứng chỉ số gốc từ MongoDB Atlas lên để đối chiếu minh bạch.
-    """
     record = storage.get_provenance_record(record_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Thất bại: Không tìm thấy mã minh chứng nông sản hợp lệ cho '{record_id}'!"
         )
-    return {
-        "status": "success",
-        "data": record
-    }
+    return {"status": "success", "data": record}
+
+
+# =====================================================================
+# 🔥 THÊM MỚI SPRINT 4: GIAO DIỆN CHỨNG CHỈ SỐ MẶT TIỀN (QUÉT MÃ QR)
+# =====================================================================
+@app.get("/verify/{record_id}", response_class=HTMLResponse)
+def verify_provenance_page(record_id: str):
+    """
+    MẶT TIỀN THƯƠNG MẠI: Dệt trang web chứng chỉ số VietGAP siêu đẹp bằng Tailwind CSS.
+    Hiển thị trực quan cho người tiêu dùng và chuỗi siêu thị khi quét mã QR thực địa.
+    """
+    record = storage.get_provenance_record(record_id)
+    
+    # 🚨 KỊCH BẢN THẤT BẠI: Nếu nhập mã khống, hiển thị trang cảnh báo an ninh màu đỏ
+    if not record:
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>CẢNH BÁO MINH CHỨNG - Smart Farm Mê Linh</title>
+            <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        </head>
+        <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex items-center justify-center p-4">
+            <div class="bg-slate-900 border-2 border-red-500 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+                <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-900/50 border border-red-500 mb-4 animate-pulse">
+                    <span class="text-red-500 text-3xl font-bold">⚠️</span>
+                </div>
+                <h1 class="text-xl font-bold text-red-400 mb-2">MÃ GIAN LẬN HOẶC KHÔNG TỒN TẠI</h1>
+                <p class="text-sm text-slate-400 mb-6">Hệ thống Đám mây không tìm thấy bất kỳ chứng chỉ VietGAP nào khớp với mã số <span class="text-red-300 font-mono font-bold block mt-1 bg-slate-950 p-2 rounded border border-red-900/50">{record_id}</span></p>
+                <div class="text-xs text-slate-500 border-t border-slate-800 pt-4">Phát hiện nguy cơ tráo hàng hoặc lỗi tem nhãn trung gian.</div>
+            </div>
+        </body>
+        </html>
+        """, status_code=404)
+
+    # 🟩 KỊCH BẢN THÀNH CÔNG: Dệt chứng chỉ xanh tươi bảo chứng chất lượng nông sản
+    crop_name = str(record.get('crop_type', 'NÔNG SẢN SẠCH')).replace('_', ' ')
+    stage_desc = record.get('crop_stage', 'Đang cập nhật dữ liệu sinh trưởng')
+    weather_desc = record.get('weather_telemetry', 'Không ghi nhận sự cố khí tượng')
+    ai_text = record.get('ai_directive', 'Đang cập nhật lịch khuyến nông số.')
+    v_hash = record.get('verification_hash', 'N/A')
+    time_iso = record.get('timestamp', 'N/A')
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CHỨNG CHỈ SỐ VIETGAP - {crop_name}</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    </head>
+    <body class="bg-slate-950 text-slate-100 font-sans min-h-screen p-4 flex justify-center items-center">
+        <div class="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden">
+            
+            <!-- Banner Bảo Chứng -->
+            <div class="bg-linear-to-r from-emerald-600 to-teal-700 p-6 text-center border-b border-emerald-500/20">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-emerald-500/30 border border-emerald-300 mb-2">
+                    <span class="text-white text-xl font-bold">✓</span>
+                </div>
+                <h1 class="text-lg font-bold text-white uppercase tracking-wider">Chứng Chỉ Minh Chứng Số VietGAP</h1>
+                <p class="text-xs text-emerald-100/80 font-mono mt-1">Mã số: {record_id}</p>
+            </div>
+
+            <!-- Nội Dung Chứng Chỉ Thực Địa -->
+            <div class="p-6 space-y-5">
+                
+                <!-- Loại nông sản -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 tracking-widest block mb-1">📦 Sản phẩm mục tiêu</span>
+                    <div class="text-xl font-black text-emerald-400 tracking-wide font-mono">{crop_name}</div>
+                    <div class="text-xs text-slate-400 mt-1">🌾 Trạng thái thu hoạch: <span class="text-slate-200">{stage_desc}</span></div>
+                </div>
+
+                <!-- Dấu vết khí tượng -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 tracking-widest block mb-1">🌤️ Minh chứng thời tiết thực tế</span>
+                    <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{weather_desc}</p>
+                </div>
+
+                <!-- Lời dặn AI (Bằng chứng trí tuệ gốc) -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 tracking-widest block mb-1">🤖 Khuyến nông số độc bản (AI Directive)</span>
+                    <p class="text-xs text-slate-300 italic leading-relaxed">"{ai_text}"</p>
+                </div>
+
+                <!-- Thời gian đồng bộ -->
+                <div class="flex justify-between items-center text-xs text-slate-400 bg-slate-950/40 p-3 rounded-lg border border-slate-900">
+                    <span>⏰ Thời gian đúc mã:</span>
+                    <span class="font-mono text-slate-200">{time_iso}</span>
+                </div>
+
+                <!-- Mỏ neo mật mã bất biến SHA-256 -->
+                <div class="border-t border-slate-800/80 pt-4 text-center">
+                    <span class="text-[10px] uppercase font-bold text-emerald-500 tracking-widest block mb-1.5">🛡️ CHỮ KÝ TOÁN HỌC BẤT BIẾN (SHA-256)</span>
+                    <div class="bg-slate-950 p-2.5 rounded-lg border border-emerald-900/30 font-mono text-[9px] text-emerald-400 break-all select-all shadow-inner">
+                        {v_hash}
+                    </div>
+                    <p class="text-[9px] text-slate-500 mt-2">Dữ liệu đã khóa chết trên Blockchain/MongoDB Cloud. Phát hiện gian lận nếu sai một ký tự.</p>
+                </div>
+
+            </div>
+            
+            <!-- Footer Thương hiệu -->
+            <div class="bg-slate-950 p-3 text-center border-t border-slate-850 text-[10px] text-slate-500 tracking-wide font-medium">
+                NỀN TẢNG THƯƠNG MẠI SMART FARM MÊ LINH V2.8
+            </div>
+
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
 
 
 # =====================================================================
