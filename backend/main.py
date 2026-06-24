@@ -73,7 +73,7 @@ def send_telegram_message(text: str) -> bool:
         return False
 
 # =====================================================================
-# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI
+# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (CÓ QR CODE)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: str = None):
@@ -142,11 +142,19 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     if not recommendation_text or len(recommendation_text) < 60:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu."
 
+    # Gọi lõi sâu sinh chứng chỉ số tích hợp link QR
     provenance_record = provenance_engine.build_provenance_footprint(
         crop=crop, stage=stage_text, weather_text=forecast_summary, ai_text=recommendation_text
     )
 
-    final_message = f"📢 [DỰ BÁO KHUYẾN NÔNG MVP - {crop_title}]\n\n{recommendation_text}\n\n🔑 [MÃ MINH CHỨNG SỐ VIETGAP]: {provenance_record.record_id}\n🛡️ [CHỮ KÝ ĐIỆN TỬ]: {provenance_record.verification_hash[:16]}..."
+    # 🔥 NÂNG CẤP V5: Đính link tải ảnh QR in ấn thực địa trực tiếp vào tin nhắn Telegram gửi đi
+    final_message = (
+        f"📢 [DỰ BÁO KHUYẾN NÔNG MVP - {crop_title}]\n\n"
+        f"{recommendation_text}\n\n"
+        f"🔑 [MÃ MINH CHỨNG SỐ VIETGAP]: {provenance_record.record_id}\n"
+        f"🛡️ [CHỮ KÝ ĐIỆN TỬ]: {provenance_record.verification_hash[:16]}...\n"
+        f"📷 [TEM QR CODE IN ẤN]: {provenance_record.qr_code_url}"
+    )
     
     is_sent = send_telegram_message(text=final_message)
     if is_sent:
@@ -165,19 +173,12 @@ def get_provenance_verification(record_id: str):
     return {"status": "success", "data": record}
 
 # =====================================================================
-# 🔥 CHUẨN HOÁ MODULE SÂU: ENDPOINT MẶT TIỀN GIAO DIỆN (QUÉT MÃ QR)
+# 🎨 ENDPOINT MẶT TIỀN GIAO DIỆN (QUÉT MÃ QR CỦA SIÊU THỊ)
 # =====================================================================
 @app.get("/verify/{record_id}", response_class=HTMLResponse)
 def verify_provenance_page(record_id: str):
-    """
-    Interface phẳng gọn tuyệt đối: Gọi hàm xử lý HTML đã giấu kín 
-    trong lòng ProvenanceEngine để tuân thủ triệt để nguyên lý Module Sâu.
-    """
     record = storage.get_provenance_record(record_id)
-    
-    # Ủy thác toàn bộ việc dệt giao diện HTML (Thành công/Thất bại) cho lõi sâu xử lý
     html_content = provenance_engine.render_html_certificate(record_id, record)
-    
     status_code = status.HTTP_200_OK if record else status.HTTP_404_NOT_FOUND
     return HTMLResponse(content=html_content, status_code=status_code)
 
