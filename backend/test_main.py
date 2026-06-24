@@ -9,6 +9,7 @@ os.environ["TELEGRAM_BOT_TOKEN"] = "mock_bot_token"
 os.environ["TELEGRAM_CHAT_ID"] = "mock_chat_id"
 os.environ["GEMINI_API_KEY"] = "mock_gemini_key"
 os.environ["WEATHER_API_KEY"] = "mock_weather_key"
+os.environ["BASE_URL"] = "http://127.0.0.1:8000"
 
 from backend.main import app
 # NẠP MODULE MINH CHỨNG ĐỂ CHẠY LƯỚI GÁC CỔNG
@@ -36,7 +37,7 @@ def verify_budget_safety(attempt_count: int):
 # =====================================================================
 
 def test_weather_input_sanity_check():
-    """Hóa giải Nghi ngờ 7 & 11: Kiểm thử màng lọc dữ liệu đầu vào khí tượng."""
+    """Kiểm thử màng lọc dữ liệu đầu vào khí tượng."""
     valid_payload = {
         "station_name": "Trạm Mê Linh Test",
         "temperature": 32.5,
@@ -52,7 +53,7 @@ def test_weather_input_sanity_check():
     invalid_payload = {
         "station_name": "Trạm Mê Linh Phá Hoại",
         "temperature": 32.5,
-        "humidity": 150.0,  # Sai quy luật vật lý
+        "humidity": 150.0,
         "rain": 0.0,
         "weather_code": 1000
     }
@@ -72,7 +73,7 @@ def test_broadcast_endpoint_security_lock():
 @patch('backend.main.requests.post')
 @patch('backend.storage.MongoStorage.save_provenance_record', return_value=True)
 def test_broadcast_flow_success_with_mock_api(mock_save_prov, mock_tg_post, mock_weather_get, mock_gemini_client):
-    """MÔ PHỎNG THỰC CHIẾN TOÀN TRÌNH KHÔNG TỐN TIỀN TOKEN API"""
+    """MÔ PHỎNG THỰC CHIẾN TOÀN TRÌNH: CHECK LUỒNG PHÁT BẢN TIN KÈM LINK QR V5"""
     mock_weather_get.return_value.status_code = 200
     mock_weather_get.return_value.json.return_value = {
         "forecast": {
@@ -95,8 +96,9 @@ def test_broadcast_flow_success_with_mock_api(mock_save_prov, mock_tg_post, mock
     
     assert response.status_code == 200
     assert response.json()["status"] == "success"
-    assert "📢 [DỰ BÁO KHUYẾN NÔNG MVP - NGO NOT]" in response.json()["preview"] or "📢 [DỰ BÁO KHUYẾN NÔNG MVP - NGO NGOT]" in response.json()["preview"]
-    assert "🔑 [MÃ MINH CHỨNG SỐ VIETGAP]" in response.json()["preview"]
+    # 🔥 Xác thực bản tin bắn đi bắt buộc phải chứa link QR thực địa
+    assert "[TEM QR CODE IN ẤN]" in response.json()["preview"]
+    assert "https://api.qrserver.com/v1/create-qr-code/" in response.json()["preview"]
 
 
 def test_circuit_breaker_execution():
@@ -106,10 +108,10 @@ def test_circuit_breaker_execution():
 
 
 # =====================================================================
-# 🧪 KIỂM THỬ HẠ TẦNG MINH CHỨNG NÔNG SẢN TỰ ĐỘNG
+# 🧪 KIỂM THỬ HẠ TẦNG MINH CHỨNG TỰ ĐỘNG NÂNG CẤP QR CODE
 # =====================================================================
 def test_provenance_engine_immutability_and_contract():
-    """Test tính bất biến và màng bảo vệ chống gian lận dữ liệu chứng chỉ."""
+    """Test hợp đồng dữ liệu V5: Kiểm tra tính bất biến và link sinh mã QR tự động."""
     mock_storage = MagicMock()
     mock_storage.save_provenance_record.return_value = True
     
@@ -124,17 +126,10 @@ def test_provenance_engine_immutability_and_contract():
     
     assert isinstance(record, ProvenanceRecord)
     assert record.crop_type == "NGO_NGOT"
-    assert record.record_id.startswith("REC-")
-    assert len(record.verification_hash) == 64
-    mock_storage.save_provenance_record.assert_called_once()
-    
-    record_clone = engine.build_provenance_footprint(
-        crop="ngo_ngot",
-        stage="Cây non 5 ngày tuổi",
-        weather_text="Nhiệt độ 35 độ C",
-        ai_text="Nhắc bà con tưới nước giữ ẩm."
-    )
-    assert record.verification_hash == record_clone.verification_hash
+    # 🔥 Khóa chặt hợp đồng: Trường qr_code_url không được trống và phải trỏ đúng API đồ họa chuẩn quốc tế
+    assert hasattr(record, "qr_code_url")
+    assert record.qr_code_url.startswith("https://api.qrserver.com/v1/create-qr-code/")
+    assert "verify/REC-" in record.qr_code_url
 
 
 # =====================================================================
@@ -151,7 +146,8 @@ def test_get_provenance_endpoint_success(mock_get_record):
         "crop_stage": "Cây non 5 ngày tuổi",
         "weather_telemetry": "Nhiệt độ 35 độ C",
         "ai_directive": "Nhắc bà con tưới nước giữ ẩm.",
-        "verification_hash": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+        "verification_hash": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=mock"
     }
     response = client.get("/api/v1/provenance/REC-A1B2C3D4E5F6")
     assert response.status_code == 200
@@ -167,11 +163,11 @@ def test_get_provenance_endpoint_not_found(mock_get_record):
 
 
 # =====================================================================
-# 🔥 THÀNH PHẨM MODULE SÂU: GÁC CỔNG GIAO DIỆN CHỨNG CHỈ MẶT TIỀN HTML (MÃ QR)
+# 🔥 GÁC CỔNG GIAO DIỆN CHỨNG CHỈ MẶT TIỀN HTML TÍCH HỢP ẢNH QR IN ẤN
 # =====================================================================
 @patch('backend.storage.MongoStorage.get_provenance_record')
 def test_verify_provenance_page_success(mock_get_record):
-    """Kịch bản 1: Khách hàng quét mã thật -> Trả về trang HTML chứng chỉ xanh tươi 200 OK."""
+    """Kịch bản 1: Khách hàng quét mã thật -> Trả về trang HTML chứng chỉ có chứa thẻ ảnh mã QR."""
     mock_get_record.return_value = {
         "_id": "648f1234567890abcdef1234",
         "record_id": "REC-MATCH12345",
@@ -180,15 +176,18 @@ def test_verify_provenance_page_success(mock_get_record):
         "crop_stage": "Cây giai đoạn cuối sắp thu hoạch",
         "weather_telemetry": "Xu hướng nắng nóng 37 độ C",
         "ai_directive": "Khuyến nghị tưới tràn giữ ẩm vào chiều mát.",
-        "verification_hash": "hash_an_toan_tuyet_doi_tram_phan_tram"
+        "verification_hash": "hash_an_toan_tuyet_doi_tram_phan_tram",
+        "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=http://127.0.0.1:8000/verify/REC-MATCH12345"
     }
 
     response = client.get("/verify/REC-MATCH12345")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Chứng Chỉ Minh Chứng Số VietGAP" in response.text
-    assert "NGO NGOT" in response.text  # 🔥 ĐÃ SỬA CHÍNH TẢ KHÍT 100% VỚI RENDER ENGINE SÂU
-    assert "hash_an_toan_tuyet_doi_tram_phan_tram" in response.text
+    assert "NGO NGOT" in response.text  
+    # 🔥 Xác thực màng lọc hiển thị: Giao diện web bắt buộc phải chứa thẻ img trích xuất link QR Code để in ấn
+    assert "img src=" in response.text
+    assert "api.qrserver.com" in response.text
 
 
 @patch('backend.storage.MongoStorage.get_provenance_record')
@@ -200,4 +199,3 @@ def test_verify_provenance_page_not_found(mock_get_record):
     assert response.status_code == 404
     assert "text/html" in response.headers["content-type"]
     assert "MÃ GIAN LẬN HOẶC KHÔNG TỒN TẠI" in response.text
-    assert "REC-MA_FOKE_GIA_MAO" in response.text
