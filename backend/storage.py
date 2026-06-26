@@ -103,26 +103,47 @@ class MongoStorage:
             return False
 
     # =====================================================================
-    # 🔥 THÊM MỚI SPRINT 3: HÀM TRUY VẾT BỐC CHỨNG CHỈ SỐ TỪ MÃ RECORD_ID
+    # 🔍 HÀM TRUY VẾT BỐC CHỨNG CHỈ SỐ TỪ MÃ RECORD_ID
     # =====================================================================
     def get_provenance_record(self, record_id: str) -> dict | None:
-        """
-        Lùng sục và bốc chính xác chứng chỉ số dựa vào mã record_id.
-        Phục vụ cổng tra cứu công khai bằng mã QR của siêu thị.
-        """
+        """Lùng sục và bốc chính xác chứng chỉ số dựa vào mã record_id."""
         if not self.client:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi tra cứu chứng chỉ.")
             return None
             
         try:
-            # Tìm kiếm bản ghi khít 100% mã record_id (Ví dụ: REC-A1B2C3D4E5F6)
             record = self.provenance_collection.find_one({"record_id": record_id})
-            
             if record:
-                record["_id"] = str(record["_id"])  # Ép kiểu ObjectId của MongoDB sang String
+                record["_id"] = str(record["_id"])  # Ép kiểu ObjectId sang String
                 return record
-                
             return None
         except PyMongoError as e:
             print(f"❌ Sự cố truy vấn mã minh chứng {record_id} trên MongoDB Atlas: {e}")
             return None
+
+    # =====================================================================
+    # 🔥 THÊM MỚI SPRINT 6: BỐC TOÀN BỘ DANH SÁCH LỊCH SỬ SỔ CÁI (B2B AUDIT)
+    # =====================================================================
+    def get_all_provenance_records(self, limit: int = 20) -> list:
+        """
+        Bốc ngược danh sách các chứng chỉ số mới nhất từ collection provenance_logs.
+        Phục vụ trang Sổ cái hành trình (Ledger Explorer Hub) cho các đối tác siêu thị.
+        """
+        if not self.client:
+            print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi truy vấn danh sách sổ cái.")
+            return []
+            
+        try:
+            # Truy vấn toàn bộ, sắp xếp theo timestamp giảm dần (Mới nhất găm lên đầu bảng)
+            cursor = self.provenance_collection.find().sort("timestamp", -1).limit(limit)
+            records = list(cursor)
+            
+            # Ép kiểu an toàn toàn bộ danh sách kết quả trả về
+            for record in records:
+                record["_id"] = str(record["_id"])
+                
+            print(f"🟩 [Storage] Đã trích xuất thành công {len(records)} lô hàng mới nhất từ MongoDB Atlas!")
+            return records
+        except PyMongoError as e:
+            print(f"❌ Sự cố lấy danh sách sổ cái từ MongoDB Atlas: {e}")
+            return []
