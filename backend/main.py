@@ -181,18 +181,18 @@ def verify_provenance_page(record_id: str):
     return HTMLResponse(content=html_content, status_code=status_code)
 
 # =====================================================================
-# 🔥 THÊM MỚI SPRINT 6: TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB)
+# 🔥 VÁ LỖI SPRINT 6: TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB)
 # =====================================================================
 @app.get("/ledger", response_class=HTMLResponse)
 def view_provenance_ledger(limit: int = 20):
     """
     TRANG TRUNG TÂM SỔ CÁI B2B: 
     Bốc danh sách lịch sử găm hàng từ MongoDB Cloud, đẩy vào lõi sâu dệt HTML.
-    Phục vụ trực tiếp cho các Giám đốc thu mua siêu thị giám sát chuỗi cung ứng.
+    🔥 VÁ LỖI CÚ PHÁP: Chốt chết trạng thái 200 OK để thông mạch hệ thống.
     """
     records = storage.get_all_provenance_records(limit=limit)
     html_content = provenance_engine.render_html_ledger(records)
-    return HTMLResponse(content=html_content, status_code=status_code)
+    return HTMLResponse(content=html_content, status_code=status.HTTP_200_OK)
 
 # =====================================================================
 # 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA MVP THƯƠNG MẠI
