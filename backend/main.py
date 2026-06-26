@@ -42,7 +42,7 @@ except Exception as e:
     ai_client = None
 
 # =====================================================================
-# 🌤️ RECEIVE WEATHER DATA
+# 🌤️ RECEIVE WEATHER DATA (GIỮ NGUYÊN)
 # =====================================================================
 class WeatherDataInput(BaseModel):
     station_name: str = Field(..., example="Trạm khí tượng vĩ mô Mê Linh")
@@ -73,7 +73,7 @@ def send_telegram_message(text: str) -> bool:
         return False
 
 # =====================================================================
-# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (CÓ QR CODE)
+# 🚀 ENDPOINT PHÁT TIN MVP THƯƠNG MẠI (TÍCH HỢP QR CODE)
 # =====================================================================
 @app.get("/api/v1/zalo/broadcast")
 def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: str = None):
@@ -142,12 +142,10 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
     if not recommendation_text or len(recommendation_text) < 60:
         recommendation_text = "Hệ thống đang cập nhật lịch khuyến nông hè. Bà con chủ động giữ ẩm ruộng rau màu."
 
-    # Gọi lõi sâu sinh chứng chỉ số tích hợp link QR
     provenance_record = provenance_engine.build_provenance_footprint(
         crop=crop, stage=stage_text, weather_text=forecast_summary, ai_text=recommendation_text
     )
 
-    # 🔥 NÂNG CẤP V5: Đính link tải ảnh QR in ấn thực địa trực tiếp vào tin nhắn Telegram gửi đi
     final_message = (
         f"📢 [DỰ BÁO KHUYẾN NÔNG MVP - {crop_title}]\n\n"
         f"{recommendation_text}\n\n"
@@ -173,13 +171,27 @@ def get_provenance_verification(record_id: str):
     return {"status": "success", "data": record}
 
 # =====================================================================
-# 🎨 ENDPOINT MẶT TIỀN GIAO DIỆN (QUÉT MÃ QR CỦA SIÊU THỊ)
+# 🎨 ENDPOINT MẶT TIỀN GIAO DIỆN CHỨNG CHỈ ĐƠN LẺ (QUÉT MÃ QR CỦA SIÊU THỊ)
 # =====================================================================
 @app.get("/verify/{record_id}", response_class=HTMLResponse)
 def verify_provenance_page(record_id: str):
     record = storage.get_provenance_record(record_id)
     html_content = provenance_engine.render_html_certificate(record_id, record)
     status_code = status.HTTP_200_OK if record else status.HTTP_404_NOT_FOUND
+    return HTMLResponse(content=html_content, status_code=status_code)
+
+# =====================================================================
+# 🔥 THÊM MỚI SPRINT 6: TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB)
+# =====================================================================
+@app.get("/ledger", response_class=HTMLResponse)
+def view_provenance_ledger(limit: int = 20):
+    """
+    TRANG TRUNG TÂM SỔ CÁI B2B: 
+    Bốc danh sách lịch sử găm hàng từ MongoDB Cloud, đẩy vào lõi sâu dệt HTML.
+    Phục vụ trực tiếp cho các Giám đốc thu mua siêu thị giám sát chuỗi cung ứng.
+    """
+    records = storage.get_all_provenance_records(limit=limit)
+    html_content = provenance_engine.render_html_ledger(records)
     return HTMLResponse(content=html_content, status_code=status_code)
 
 # =====================================================================
@@ -194,9 +206,10 @@ def remote_dashboard(token: str = None):
     <head><title>Smart Farm Mê Linh</title><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script></head>
     <body class="bg-slate-900 text-slate-100 flex flex-col justify-center items-center min-h-screen">
         <div class="bg-slate-800 p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-700 text-center">
-            <h1 class="text-xl font-bold text-emerald-400 mb-6">🚜 SMART FARM MÊ LINH v2.8</h1>
-            <div class="space-y-4 text-left">
-                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5{token_suffix}" target="_blank" class="block w-full py-2.5 bg-emerald-600 rounded-xl text-center font-medium">🌽 Gieo hạt (5 ngày) + Tự đúc minh chứng</a>
+            <h1 class="text-xl font-bold text-emerald-400 mb-2">🚜 SMART FARM MÊ LINH v2.8</h1>
+            <div class="space-y-4 text-left pt-4">
+                <a href="/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5{token_suffix}" target="_blank" class="block w-full py-2.5 bg-emerald-600 rounded-xl text-center font-medium no-underline">🌽 Phát tin + Đúc minh chứng</a>
+                <a href="/ledger" target="_blank" class="block w-full py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-center font-medium text-emerald-400 no-underline">🛡️ Vào Sổ Cái Hành Trình B2B</a>
             </div>
         </div>
     </body>
