@@ -94,6 +94,10 @@ class MongoStorage:
         try:
             if "created_at" not in record_dict:
                 record_dict["created_at"] = datetime.now(timezone.utc)
+            
+            # 🔥 KHỞI TẠO V7: Đóng đinh số lần quét ban đầu bằng 0 cho lô hàng mới xuất xưởng
+            if "scan_count" not in record_dict:
+                record_dict["scan_count"] = 0
                 
             self.provenance_collection.insert_one(record_dict)
             print(f"🟩 [Storage] Đã đúc chết mã minh chứng {record_dict.get('record_id')} vào MongoDB Atlas thành công!")
@@ -103,46 +107,51 @@ class MongoStorage:
             return False
 
     # =====================================================================
-    # 🔍 HÀM TRUY VẾT BỐC CHỨNG CHỈ SỐ TỪ MÃ RECORD_ID
+    # 🔥 NÂNG CẤP SPRINT 7: HÀM TRUY VẾT TÍCH HỢP BỘ ĐẾM QUÉTTỰ ĐỘNG
     # =====================================================================
-    def get_provenance_record(self, record_id: str) -> dict | None:
-        """Lùng sục và bốc chính xác chứng chỉ số dựa vào mã record_id."""
+    def get_provenance_record(self, record_id: str, increment: bool = False) -> dict | None:
+        """
+        Lùng sục và bốc chính xác chứng chỉ số dựa vào mã record_id.
+        Nếu increment=True (Lệnh quét từ QR thật), tự động tăng bộ đếm scan_count lên +1 nguyên tử.
+        """
         if not self.client:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi tra cứu chứng chỉ.")
             return None
             
         try:
+            # ⚡ Nếu kích hoạt lệnh đếm thực địa, thực hiện tăng toán học trực tiếp trên MongoDB Atlas
+            if increment:
+                self.provenance_collection.update_one(
+                    {"record_id": record_id},
+                    {"$inc": {"scan_count": 1}}
+                )
+                
             record = self.provenance_collection.find_one({"record_id": record_id})
             if record:
-                record["_id"] = str(record["_id"])  # Ép kiểu ObjectId sang String
+                record["_id"] = str(record["_id"])  # Ép kiểu ObjectId của MongoDB sang String
                 return record
+                
             return None
         except PyMongoError as e:
             print(f"❌ Sự cố truy vấn mã minh chứng {record_id} trên MongoDB Atlas: {e}")
             return None
 
     # =====================================================================
-    # 🔥 THÊM MỚI SPRINT 6: BỐC TOÀN BỘ DANH SÁCH LỊCH SỬ SỔ CÁI (B2B AUDIT)
+    # 🔍 BỐC TOÀN BỘ DANH SÁCH LỊCH SỬ SỔ CÁI (B2B AUDIT)
     # =====================================================================
     def get_all_provenance_records(self, limit: int = 20) -> list:
-        """
-        Bốc ngược danh sách các chứng chỉ số mới nhất từ collection provenance_logs.
-        Phục vụ trang Sổ cái hành trình (Ledger Explorer Hub) cho các đối tác siêu thị.
-        """
+        """Bốc ngược danh sách các chứng chỉ số mới nhất từ collection provenance_logs."""
         if not self.client:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi truy vấn danh sách sổ cái.")
             return []
             
         try:
-            # Truy vấn toàn bộ, sắp xếp theo timestamp giảm dần (Mới nhất găm lên đầu bảng)
             cursor = self.provenance_collection.find().sort("timestamp", -1).limit(limit)
             records = list(cursor)
             
-            # Ép kiểu an toàn toàn bộ danh sách kết quả trả về
             for record in records:
                 record["_id"] = str(record["_id"])
                 
-            print(f"🟩 [Storage] Đã trích xuất thành công {len(records)} lô hàng mới nhất từ MongoDB Atlas!")
             return records
         except PyMongoError as e:
             print(f"❌ Sự cố lấy danh sách sổ cái từ MongoDB Atlas: {e}")
