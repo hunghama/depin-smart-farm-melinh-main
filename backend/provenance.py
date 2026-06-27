@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 # -------------------------------------------------------------
-# DTO (DATA TRANSFER OBJECT): KHÓA CHẶT BIÊN GIỚI DỮ LIỆU
+# DTO (DATA TRANSFER OBJECT): KHÓA CHẶT BIÊN GIỚI DỮ LIỆU V7
 # -------------------------------------------------------------
 class ProvenanceRecord(BaseModel):
-    """Màng bảo vệ cấu trúc chứng chỉ VietGAP số nâng cấp tích hợp QR."""
+    """Màng bảo vệ cấu trúc chứng chỉ VietGAP số nâng cấp tích hợp QR và bộ đếm."""
     record_id: str = Field(..., description="Mã băm độc bản của bản ghi minh chứng")
     timestamp: str = Field(..., description="Thời gian ghi nhận chuẩn ISO UTC+7")
     crop_type: str = Field(..., example="NGO_NGOT")
@@ -17,6 +17,7 @@ class ProvenanceRecord(BaseModel):
     ai_directive: str = Field(..., description="Lời dặn hành động gốc mà AI đã phát đi")
     verification_hash: str = Field(..., description="Chữ ký số kiểm tra tính toàn vẹn, chống sửa đổi dữ liệu")
     qr_code_url: str = Field(..., description="Đường dẫn ảnh QR Code phục vụ in ấn tem nhãn thực địa")
+    scan_count: int = Field(0, description="Tổng số lần người tiêu dùng đã quét mã thực địa")
 
 # -------------------------------------------------------------
 # CORE LOGIC: HỘP XÁM TỰ ĐỘNG SINH DẤU CHÂN SỐ & ĐÚC QR CODE
@@ -32,7 +33,7 @@ class ProvenanceEngine:
         return hashlib.sha256(serialized_data.encode('utf-8')).hexdigest()
 
     def build_provenance_footprint(self, crop: str, stage: str, weather_text: str, ai_text: str) -> ProvenanceRecord:
-        """HỘP XÁM SÂU V5: Tự động gom dữ liệu thời gian thực để dệt thành chứng chỉ số."""
+        """HỘP XÁM SÂU V7: Tự động gom dữ liệu thời gian thực để dệt thành chứng chỉ số."""
         vn_time = datetime.now(timezone.utc).isoformat()
         
         raw_payload = {
@@ -56,7 +57,8 @@ class ProvenanceEngine:
             weather_telemetry=weather_text,
             ai_directive=ai_text,
             verification_hash=v_hash,
-            qr_code_url=qr_code_url
+            qr_code_url=qr_code_url,
+            scan_count=0
         )
         
         if self.storage:
@@ -65,7 +67,7 @@ class ProvenanceEngine:
         return record
 
     # =====================================================================
-    # 🎨 THỰC THI MODULE SÂU: DỆT HTML CHỨNG CHỈ ĐƠN LẺ (QUÉT MÃ QR)
+    # 🎨 THỰC THI MODULE SÂU: DỆT HTML CHỨNG CHỈ ĐƠN LẺ CÓ HIỂN THỊ SỐ LẦN QUÉT
     # =====================================================================
     def render_html_certificate(self, record_id: str, record: dict | None) -> str:
         """Đóng hòm toàn bộ logic diện mạo hiển thị chứng chỉ vào lòng tầng sâu."""
@@ -98,6 +100,9 @@ class ProvenanceEngine:
         v_hash = record.get('verification_hash', 'N/A')
         time_iso = record.get('timestamp', 'N/A')
         
+        # 🔥 TRÍCH XUẤT V7: Bốc số lượt quét thực địa để kích hoạt hiệu ứng Social Proof
+        scan_count = record.get('scan_count', 0)
+        
         base_url = self.base_url
         qr_img = record.get('qr_code_url', f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={base_url}/verify/{record_id}")
 
@@ -120,6 +125,12 @@ class ProvenanceEngine:
                     <p class="text-xs text-emerald-100/80 font-mono mt-1">Mã số: {record_id}</p>
                 </div>
                 <div class="p-6 space-y-5">
+                    
+                    <div class="bg-emerald-950/40 p-3.5 rounded-xl border border-emerald-900/40 flex items-center justify-between text-xs text-emerald-400">
+                        <span class="flex items-center gap-1.5 font-medium">🛡️ Trạng thái đối chiếu:</span>
+                        <span class="font-black font-mono bg-emerald-900/40 px-2 py-0.5 rounded border border-emerald-500/20">👁️ Đã quét {scan_count} lần</span>
+                    </div>
+
                     <div class="bg-white p-4 rounded-xl flex flex-col items-center justify-center border border-slate-200">
                         <span class="text-[10px] uppercase font-black text-slate-500 tracking-widest mb-2 block">📷 Tem QR Code Quét Tại Siêu Thị</span>
                         <img src="{qr_img}" alt="QR" class="w-44 h-44 border border-slate-100 p-1 bg-white rounded-lg" />
@@ -152,19 +163,16 @@ class ProvenanceEngine:
         """
 
     # =====================================================================
-    # 🔥 THÊM MỚI SPRINT 6: DỆT HỒ SƠ SỔ CÁI B2B (LEDGER EXPLORER HUB)
+    # 🛡️ THỰC THI MODULE SÂU: DỆT HỒ SƠ SỔ CÁI B2B CÓ CỘT ANALYTICS LƯỢT QUÉT
     # =====================================================================
     def render_html_ledger(self, records: list) -> str:
-        """
-        Dệt giao diện Sổ cái tập trung Audit Trail tối tân cho đối tác siêu thị.
-        Giấu kín toàn bộ logic lặp mảng phức tạp khỏi file main.py.
-        """
+        """Dệt giao diện Sổ cái tập trung Audit Trail tích hợp cột Analytics lượt quét."""
         rows_html = ""
         
         if not records:
             rows_html = """
             <tr>
-                <td colspan="5" class="p-8 text-center text-xs text-slate-500 italic">
+                <td colspan="6" class="p-8 text-center text-xs text-slate-500 italic">
                     📭 Hệ thống đám mây chưa ghi nhận lô hàng minh chứng nào xuất xưởng.
                 </td>
             </tr>
@@ -175,8 +183,9 @@ class ProvenanceEngine:
                 crop = str(r.get("crop_type", "NÔNG SẢN")).replace("_", " ")
                 stage = r.get("crop_stage", "N/A")
                 time_iso = r.get("timestamp", "N/A")
+                # 🔥 TRÍCH XUẤT V7: Bốc số lượt quét hiển thị thẳng lên bảng điều khiển B2B
+                sc_metrics = r.get("scan_count", 0)
                 
-                # Cắt ngắn chuỗi ISO bớt rác rưởi cho đẹp bảng
                 formatted_time = time_iso.split(".")[0].replace("T", " ") if "T" in time_iso else time_iso
                 
                 rows_html += f"""
@@ -185,6 +194,7 @@ class ProvenanceEngine:
                     <td class="p-4 text-xs font-mono font-bold text-emerald-400 tracking-wide">{rec_id}</td>
                     <td class="p-4 text-xs font-black text-slate-200 tracking-wider uppercase">{crop}</td>
                     <td class="p-4 text-xs text-slate-400 max-w-xs truncate">{stage}</td>
+                    <td class="p-4 text-center text-xs font-mono font-bold text-teal-400 bg-slate-950/20">{sc_metrics}</td>
                     <td class="p-4 text-right">
                         <a href="/verify/{rec_id}" target="_blank" class="inline-block px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[11px] font-bold rounded-lg border border-emerald-500/20 hover:border-emerald-500 transition no-underline">
                             Đối chiếu QR →
@@ -227,6 +237,7 @@ class ProvenanceEngine:
                                     <th class="p-4">🔑 Mã bản ghi (QR ID)</th>
                                     <th class="p-4">📦 Loại nông sản</th>
                                     <th class="p-4">🌾 Trạng thái ruộng màu</th>
+                                    <th class="p-4 text-center">👁️ Số Lượt Quét</th>
                                     <th class="p-4 text-right">🛠️ Hành động</th>
                                 </tr>
                             </thead>
