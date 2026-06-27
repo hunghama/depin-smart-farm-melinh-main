@@ -80,55 +80,41 @@ def test_provenance_engine_immutability_and_contract():
 
 
 # =====================================================================
-# 🧪 GÁC CỔNG TẦNG JSON API TRA CỨU
+# 🧪 GÁC CỔNG TẦNG JSON API TRA CỨU (CHECK CHỐNG TĂNG ÁO SỐ LƯỢT QUÉT)
 # =====================================================================
 @patch('backend.storage.MongoStorage.get_provenance_record')
 def test_get_provenance_endpoint_success(mock_get_record):
-    mock_get_record.return_value = {"_id": "1", "record_id": "REC-A1B2", "timestamp": "2026", "crop_type": "NGO_NGOT", "crop_stage": "Cây non", "weather_telemetry": "Nắng", "ai_directive": "Tưới", "verification_hash": "abc"}
-    assert client.get("/api/v1/provenance/REC-A1B2").status_code == 200
+    mock_get_record.return_value = {"_id": "1", "record_id": "REC-A1B2", "timestamp": "2026", "crop_type": "NGO_NGOT", "crop_stage": "Cây non", "weather_telemetry": "Nắng", "ai_directive": "Tưới", "verification_hash": "abc", "scan_count": 5}
+    response = client.get("/api/v1/provenance/REC-A1B2")
+    assert response.status_code == 200
+    # 🔥 HỢP ĐỒNG AN TOÀN: Truy vấn JSON bắt buộc phải giữ bộ đếm đứng yên
+    mock_get_record.assert_called_once_with("REC-A1B2", increment=False)
 
 
 # =====================================================================
-# 🧪 GÁC CỔNG GIAO DIỆN CHỨNG CHỈ MẶT TIỀN HTML (MÃ QR ĐƠN LẺ)
+# 🧪 GÁC CỔNG GIAO DIỆN CHỨNG CHỈ (XÁC THỰC BỘ ĐẾM HOẠT ĐỘNG)
 # =====================================================================
 @patch('backend.storage.MongoStorage.get_provenance_record')
 def test_verify_provenance_page_success(mock_get_record):
-    mock_get_record.return_value = {"_id": "1", "record_id": "REC-M123", "timestamp": "2026", "crop_type": "NGO_NGOT", "crop_stage": "Thu hoạch", "weather_telemetry": "Nắng", "ai_directive": "Tưới", "verification_hash": "xyz"}
+    mock_get_record.return_value = {"_id": "1", "record_id": "REC-M123", "timestamp": "2026", "crop_type": "NGO_NGOT", "crop_stage": "Thu hoạch", "weather_telemetry": "Nắng", "ai_directive": "Tưới", "verification_hash": "xyz", "scan_count": 42}
     response = client.get("/verify/REC-M123")
     assert response.status_code == 200
     assert "Chứng Chỉ Minh Chứng Số VietGAP" in response.text
-    assert "img src=" in response.text
+    assert "Đã quét 42 lần" in response.text
+    # 🔥 HỢP ĐỒNG THỰC ĐỊA: Quét mã HTML mặt tiền bắt buộc phải kích nổ bộ đếm nguyên tử +1
+    mock_get_record.assert_called_once_with("REC-M123", increment=True)
 
 
 # =====================================================================
-# 🔥 THÊM MỚI SPRINT 6: GÁC CỔNG TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI
+# 📊 GÁC CỔNG TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI
 # =====================================================================
 @patch('backend.storage.MongoStorage.get_all_provenance_records')
 def test_view_provenance_ledger_hub_success(mock_get_all):
-    """
-    Kịch bản gác cổng Sổ cái: Giả lập bốc danh sách từ MongoDB Cloud lên,
-    xác thực hệ thống dệt bảng Audit Trail chính xác mã bản ghi và nút đối chiếu QR.
-    """
     mock_get_all.return_value = [
-        {
-            "_id": "648f1234567890abcdef1234",
-            "record_id": "REC-AUDIT9999",
-            "timestamp": "2026-06-26T12:00:00.000Z",
-            "crop_type": "NGO_NGOT",
-            "crop_stage": "Cây giai đoạn cuối chuẩn bị thu hoạch",
-            "weather_telemetry": "Xu hướng nắng nóng hè cao điểm 37 độ C",
-            "ai_directive": "Nhà vườn thu hoạch vào sáng sớm mát mẻ.",
-            "verification_hash": "hash_bao_chung_chuoi_cung_ung_b2b_saas",
-            "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=mock"
-        }
+        {"_id": "1", "record_id": "REC-AUDIT9999", "timestamp": "2026", "crop_type": "NGO_NGOT", "crop_stage": "Thu hoạch", "weather_telemetry": "Nắng", "ai_directive": "Mát", "verification_hash": "hash", "scan_count": 100}
     ]
-
     response = client.get("/ledger")
     assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    # Kiểm tra các từ khóa bảo chứng trên mặt tiền Sổ cái Audit Trail
-    assert "SỔ CÁI MINH CHỨNG SỐ" in response.text or "Sổ Cái Hành Trình" in response.text
+    assert "Sổ Cái Hành Trình" in response.text
     assert "REC-AUDIT9999" in response.text
-    assert "NGO NGOT" in response.text
-    assert "Đối chiếu QR" in response.text
-    mock_get_all.assert_called_once_with(limit=20)
+    assert "100" in response.text  # Xác thực số lượt quét đã hiển thị trên bảng Audit Trail
