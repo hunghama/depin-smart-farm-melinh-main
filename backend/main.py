@@ -161,35 +161,35 @@ def trigger_concierge_broadcast(crop: str = "chung", days_old: int = 0, token: s
         raise HTTPException(status_code=500, detail="Lỗi kết nối cổng Telegram")
 
 # =====================================================================
-# ⚙️ ENDPOINT TRA CỨU JSON DÀNH CHO LẬP TRÌNH VIÊN
+# ⚙️ ENDPOINT TRA CỨU JSON DÀNH CHO LẬP TRÌNH VIÊN (CHỐNG NHIỄU BỘ ĐẾM)
 # =====================================================================
 @app.get("/api/v1/provenance/{record_id}")
 def get_provenance_verification(record_id: str):
-    record = storage.get_provenance_record(record_id)
+    # Tra cứu thuần túy hệ thống, để mặc định increment=False chống tăng số ảo
+    record = storage.get_provenance_record(record_id, increment=False)
     if not record:
         raise HTTPException(status_code=404, detail="Không tìm thấy mã minh chứng nông sản!")
     return {"status": "success", "data": record}
 
 # =====================================================================
-# 🎨 ENDPOINT MẶT TIỀN GIAO DIỆN CHỨNG CHỈ ĐƠN LẺ (QUÉT MÃ QR CỦA SIÊU THỊ)
+# 🎨 ENDPOINT MẶT TIỀN GIAO DIỆN (QUÉT MÃ QR THẬT CỦA KHÁCH MUA HÀNG)
 # =====================================================================
 @app.get("/verify/{record_id}", response_class=HTMLResponse)
 def verify_provenance_page(record_id: str):
-    record = storage.get_provenance_record(record_id)
+    """
+    MẶT TIỀN QUÉT QR: Kích hoạt tham số increment=True nguyên tử.
+    Mỗi click xem của người dùng ngoài siêu thị sẽ được ghi nhận ngay lập tức!
+    """
+    record = storage.get_provenance_record(record_id, increment=True)
     html_content = provenance_engine.render_html_certificate(record_id, record)
     status_code = status.HTTP_200_OK if record else status.HTTP_404_NOT_FOUND
     return HTMLResponse(content=html_content, status_code=status_code)
 
 # =====================================================================
-# 🔥 VÁ LỖI SPRINT 6: TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB)
+# 📊 TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB)
 # =====================================================================
 @app.get("/ledger", response_class=HTMLResponse)
 def view_provenance_ledger(limit: int = 20):
-    """
-    TRANG TRUNG TÂM SỔ CÁI B2B: 
-    Bốc danh sách lịch sử găm hàng từ MongoDB Cloud, đẩy vào lõi sâu dệt HTML.
-    🔥 VÁ LỖI CÚ PHÁP: Chốt chết trạng thái 200 OK để thông mạch hệ thống.
-    """
     records = storage.get_all_provenance_records(limit=limit)
     html_content = provenance_engine.render_html_ledger(records)
     return HTMLResponse(content=html_content, status_code=status.HTTP_200_OK)
