@@ -107,7 +107,7 @@ class MongoStorage:
             return False
 
     # =====================================================================
-    # 🔥 NÂNG CẤP SPRINT 7: HÀM TRUY VẾT TÍCH HỢP BỘ ĐẾM QUÉTTỰ ĐỘNG
+    # 🔥 NÂNG CẤP SPRINT 7: HÀM TRUY VẾT TÍCH HỢP BỘ ĐẾM QUÉT TỰ ĐỘNG
     # =====================================================================
     def get_provenance_record(self, record_id: str, increment: bool = False) -> dict | None:
         """
@@ -137,20 +137,24 @@ class MongoStorage:
             return None
 
     # =====================================================================
-    # 🔍 BỐC TOÀN BỘ DANH SÁCH LỊCH SỬ SỔ CÁI (B2B AUDIT)
+    # 🔍 BỐC TOÀN BỘ DANH SÁCH LỊCH SỬ SỔ CÁI (B2B AUDIT) - ĐÃ DIỆT BUG SORT
     # =====================================================================
-    def get_all_provenance_records(self, limit: int = 20) -> list:
-        """Bốc ngược danh sách các chứng chỉ số mới nhất từ collection provenance_logs."""
+    def get_all_provenance_records(self, limit: int = 50) -> list:
+        """
+        Bốc ngược danh sách các chứng chỉ số mới nhất từ collection provenance_logs.
+        Đã sửa lỗi: Sắp xếp chuẩn xác theo trường 'created_at' giảm dần để hàng mới nhất lên đầu kho.
+        """
         if not self.client:
             print("⚠️ Cảnh báo [Storage]: Mất kết nối database khi truy vấn danh sách sổ cái.")
             return []
             
         try:
-            cursor = self.provenance_collection.find().sort("timestamp", -1).limit(limit)
+            # Sửa bug: Sắp xếp theo 'created_at' thay vì 'timestamp' để đồng bộ với hàm lưu dữ liệu
+            cursor = self.provenance_collection.find().sort("created_at", -1).limit(limit)
             records = list(cursor)
             
             for record in records:
-                record["_id"] = str(record["_id"])
+                record["_id"] = str(record["_id"])  # Chuyển đổi ObjectId sang string để tránh lỗi serialize JSON
                 
             return records
         except PyMongoError as e:
