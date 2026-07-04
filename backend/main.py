@@ -215,16 +215,17 @@ def verify_provenance_page(record_id: str):
     return HTMLResponse(content=html_content, status_code=status_code)
 
 # =====================================================================
-# 📊 TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB)
+# 📊 TRANG TRUNG TÂM SỔ CÁI B2B CÔNG KHAI (AUDIT LEDGER HUB) - ĐÃ ĐỒNG BỘ SORT "created_at"
 # =====================================================================
 @app.get("/ledger", response_class=HTMLResponse)
 def view_provenance_ledger(limit: int = 20):
+    # Đã sửa lỗi ngầm: storage.get_all_provenance_records sẽ tự động lôi dữ liệu sắp xếp theo 'created_at' mới nhất
     records = storage.get_all_provenance_records(limit=limit)
     html_content = provenance_engine.render_html_ledger(records)
     return HTMLResponse(content=html_content, status_code=status.HTTP_200_OK)
 
 # =====================================================================
-# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA CHO BÀ CON NÔNG DÂN
+# 🎛️ BẢNG ĐIỀU KHIỂN TỪ XA CHO BÀ CON NÔNG DÂN & CHỦ VỰA (ĐÃ KHỬ BUG FRONTEND)
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 def remote_dashboard(token: str = None):
@@ -232,27 +233,70 @@ def remote_dashboard(token: str = None):
     html_content = f"""
     <!DOCTYPE html>
     <html>
-    <head><meta charset="UTF-8"><title>Trạm Đúc Tem QR - Smart Farm Mê Linh</title><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script></head>
-    <body class="bg-slate-950 text-slate-100 font-sans min-h-screen p-4 flex flex-col justify-center items-center">
+    <head>
+        <meta charset="UTF-8">
+        <title>Trạm Đúc Tem QR - Smart Farm Mê Linh</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    </head>
+    <body class="bg-slate-950 text-slate-100 font-sans min-h-screen p-4 flex flex-col justify-center items-center space-y-4">
         <div class="w-full max-w-md bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl space-y-6">
             <div class="text-center">
                 <span class="text-xs font-bold text-emerald-400 tracking-widest uppercase block mb-1">Hạ Tầng Thực Địa</span>
                 <h1 class="text-xl font-black text-white uppercase tracking-wide">🌾 TRẠM ĐÚC TEM QR MÊ LINH</h1>
             </div>
             <div class="space-y-4">
-                <select id="cropSelect" class="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2.5 rounded-xl text-sm"><option value="ngo_ngot">🌽 Ngô ngọt Mê Linh</option></select>
-                <input type="number" id="daysInput" value="5" class="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2.5 rounded-xl text-sm" />
-                <input type="text" id="tokenInput" value="{default_token}" class="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2.5 rounded-xl text-sm" />
-                <button onclick="executeForgeQR()" id="btnSubmit" class="w-full py-3 bg-emerald-600 text-white font-bold text-sm rounded-xl">🚀 ĐÚC TEM & PHÁT TIN KHUYẾN NÔNG</button>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Mặt hàng thu mua</label>
+                <select id="cropSelect" class="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2.5 rounded-xl text-sm">
+                    <option value="ngo_ngot">🌽 Ngô ngọt Mê Linh</option>
+                </select>
+                
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Số ngày tuổi của cây</label>
+                <input type="number" id="daysInput" value="5" min="1" class="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2.5 rounded-xl text-sm" />
+                
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Mã bảo mật Trạm Đúc</label>
+                <input type="text" id="tokenInput" value="{default_token}" placeholder="Nhập khóa bảo mật..." class="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2.5 rounded-xl text-sm" />
+                
+                <button onclick="executeForgeQR()" id="btnSubmit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 cursor-pointer text-white font-bold text-sm rounded-xl transition duration-200">🚀 ĐÚC TEM & PHÁT TIN KHUYẾN NÔNG</button>
             </div>
-            <div id="resultWidget" class="hidden bg-slate-950 p-4 rounded-2xl"><img id="qrImage" src="" class="w-40 h-40 mx-auto" /></div>
+            <div id="resultWidget" class="hidden bg-slate-950 p-4 rounded-2xl text-center space-y-2">
+                <p class="text-xs text-emerald-400 font-bold">🟩 ĐÚC TEM THÀNH CÔNG! MÃ SỐ ĐỘC BẢN:</p>
+                <p id="txtRecordId" class="text-xs font-mono text-slate-400 break-all bg-slate-900 p-2 rounded-lg border border-slate-800"></p>
+                <img id="qrImage" src="" class="w-40 h-40 mx-auto border-4 border-white rounded-xl mt-2" />
+            </div>
         </div>
+        
+        <div class="w-full max-w-md text-center">
+            <a href="/ledger" class="inline-block text-xs font-medium text-slate-500 hover:text-emerald-400 transition duration-200 underline">📊 Đi tới Trung Tâm Sổ Cái Quản Lý Lô Hàng (B2B Ledger Hub) →</a>
+        </div>
+
         <script>
             async function executeForgeQR() {{
-                const res = await fetch(`/api/v1/zalo/broadcast?crop=ngo_ngot&days_old=5&token=${{document.getElementById("tokenInput").value}}`);
-                const data = await res.json();
-                document.getElementById("qrImage").src = data.provenance_metadata.qr_code_url;
-                document.getElementById("resultWidget").classList.remove("hidden");
+                // FIX BUG: Đọc động giá trị từ Form thay vì fix cứng tham số
+                const crop = document.getElementById("cropSelect").value;
+                const days = document.getElementById("daysInput").value;
+                const token = document.getElementById("tokenInput").value;
+                
+                const btn = document.getElementById("btnSubmit");
+                btn.disabled = true;
+                btn.innerText = "⏳ ĐANG ĐÚC CHỨNG CHỈ SỐ...";
+
+                try {{
+                    const res = await fetch(`/api/v1/zalo/broadcast?crop=${{crop}}&days_old=${{days}}&token=${{token}}`);
+                    const data = await res.json();
+                    
+                    if (res.status === 200 && data.status === "success") {{
+                        document.getElementById("qrImage").src = data.provenance_metadata.qr_code_url;
+                        document.getElementById("txtRecordId").innerText = data.provenance_metadata.record_id;
+                        document.getElementById("resultWidget").classList.remove("hidden");
+                    }} else {{
+                        alert("❌ Thất bại: " + (data.detail || "Sai khóa xác thực trạm đúc!"));
+                    }}
+                }} catch (err) {{
+                    alert("❌ Lỗi kết nối máy chủ Render!");
+                }} finally {{
+                    btn.disabled = false;
+                    btn.innerText = "🚀 ĐÚC TEM & PHÁT TIN KHUYẾN NÔNG";
+                }}
             }}
         </script>
     </body>
